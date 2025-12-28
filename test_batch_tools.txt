@@ -1,0 +1,7 @@
+Line1: Hello World
+Line2: hello world
+Line3: HELLO WORLD
+Line4: colour is British spelling
+Line5: color is American spelling
+Line6: This has multiple occurrences: foo bar foo baz foo
+Line7: Final line with test content

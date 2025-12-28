@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(npm run build:*)",
+      "Bash(git checkout:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: add CLI output truncation to prevent context stuffing\n\n- Add configurable cliOutput settings (maxOutputChars, warnAtChars, truncateMode)\n- Implement truncateOutput() with head/tail/both modes (both keeps 60% start + 40% end)\n- Apply truncation to exec_cli handler (50KB stdout, 25KB stderr limits)\n- Apply truncation to batch_exec_cli with per-command limits\n- Add warnings for large outputs and clear truncation metadata\n- Increase maxBuffer to 10MB to capture full output before truncating\n\nDefaults: 50KB max chars (~10-15k tokens), warn at 10KB\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: add output truncation safeguards to prevent context stuffing\n\nApply 50KB output limits (configurable via cliOutput config) to:\n- execute_code: truncate stdout/stderr from code execution\n- get_page_content: truncate HTML/text from browser pages\n- evaluate_js: truncate JS evaluation results\n- get_console_logs: limit to 500 log entries + char truncation\n- read_process_output: default 200 lines + char limit\n- clipboard_read: truncate text/html clipboard content\n\nAll tools now report truncation metadata when limits are exceeded.\nUses same truncateOutput() pattern with head/tail/both modes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

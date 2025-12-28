@@ -1,0 +1,62 @@
+{
+    "name": "mnehmos.ooda.mcp",
+    "version": "2.0.0",
+    "type": "module",
+    "description": "MCP server for full computer control - OODA loop enabled. CLI, CRUD, Filesystem, Screen capture, Input simulation, Window management, Clipboard, and System operations.",
+    "main": "dist/index.js",
+    "bin": {
+        "mnehmos-ooda-mcp": "dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "tsc --watch",
+        "prepare": "npm run build"
+    },
+    "keywords": [
+        "mcp",
+        "claude",
+        "cli",
+        "crud",
+        "sqlite",
+        "model-context-protocol",
+        "ai",
+        "llm",
+        "computer-use",
+        "automation",
+        "screen-capture",
+        "input-simulation",
+        "ooda-loop"
+    ],
+    "author": "Mnehmos",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Mnehmos/mnehmos.ooda.mcp.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Mnehmos/mnehmos.ooda.mcp/issues"
+    },
+    "homepage": "https://github.com/Mnehmos/mnehmos.ooda.mcp#readme",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^0.6.0",
+        "fastest-levenshtein": "^1.0.16",
+        "playwright": "^1.57.0",
+        "puppeteer": "^24.32.0",
+        "sqlite": "^5.0.1",
+        "sqlite3": "^5.1.6",
+        "uuid": "^13.0.0",
+        "zod": "^3.22.0",
+        "zod-to-json-schema": "^3.25.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/puppeteer": "^5.4.7",
+        "@types/sqlite3": "^3.1.8",
+        "@types/uuid": "^10.0.0",
+        "typescript": "^5.0.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}

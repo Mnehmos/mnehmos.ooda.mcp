@@ -1,0 +1,39 @@
+# Source files (users only need the built dist/)
+src/
+tsconfig.json
+*.ts
+!*.d.ts
+
+# Tests
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Documentation source (keep README.md)
+docs/
+
+# Examples and samples
+examples/
+samples/
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
