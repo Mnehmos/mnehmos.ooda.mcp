@@ -213,23 +213,6 @@ Batch operations return structured results:
 
 Optional config file at `~/.mcp/config.json`:
 
-```json
-{
-  "storage": {
-    "type": "sqlite",
-    "path": "~/.mcp/workspace.db"
-  },
-  "cliPolicy": {
-    "mode": "allow-all",
-    "extraBlockedPatterns": [],
-    "timeoutMs": 30000
-  },
-  "crud": {
-    "defaultLimit": 1000
-  }
-}
-```
-
 ## Development
 
 ```bash
