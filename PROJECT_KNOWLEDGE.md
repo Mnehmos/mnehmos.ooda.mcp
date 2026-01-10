@@ -8,11 +8,12 @@
 | **Primary Language** | TypeScript |
 | **Project Type** | MCP Server |
 | **Status** | Active |
-| **Last Updated** | 2025-12-29 |
+| **Version** | 3.0.0 |
+| **Last Updated** | 2025-01-10 |
 
 ## Overview
 
-mnehmos.ooda.mcp is a comprehensive Model Context Protocol (MCP) server that provides full computer control capabilities to Claude AI. It implements the OODA loop (Observe-Orient-Decide-Act) pattern, enabling autonomous computer interaction through 62 tools across 7 categories: CLI/filesystem operations, CRUD database, screen capture, input simulation, window management, clipboard operations, and system utilities. This server allows AI agents to perceive, reason about, and interact with desktop environments in a structured, repeatable manner.
+mnehmos.ooda.mcp is a comprehensive Model Context Protocol (MCP) server that provides full computer control capabilities to Claude AI. It implements the OODA loop (Observe-Orient-Decide-Act) pattern, enabling autonomous computer interaction through **100 tools** across 12 categories: CLI/filesystem operations, CRUD database, screen capture, input simulation, window management, clipboard operations, system utilities, browser automation, interactive sessions, diff-based editing, configuration management, and batch operations. This server allows AI agents to perceive, reason about, and interact with desktop environments in a structured, repeatable manner.
 
 ## Architecture
 
@@ -23,7 +24,8 @@ The server follows the MCP (Model Context Protocol) architecture, acting as a br
 - **MCP Server Pattern**: Uses @modelcontextprotocol/sdk for protocol compliance
 - **Cross-Platform Abstraction**: Platform-specific implementations for Windows (PowerShell/Win32 API), macOS (osascript/screencapture), and Linux (xdotool/wmctrl)
 - **Persistent Storage**: SQLite database for CRUD operations and audit logging
-- **Batch Execution Engine**: Parallel execution support for most operations with structured result reporting
+- **Generic Batch Dispatcher**: Universal `batch_tools` dispatcher that can execute ANY tool in batch mode with configurable safety limits
+- **Diff-Based Editing**: Intelligent file editing with fuzzy matching, sequential multi-edit, and bulk line replacement
 - **Browser Automation**: Integrated Playwright and Puppeteer for web automation tasks
 
 ### Key Components
@@ -42,7 +44,8 @@ The server follows the MCP (Model Context Protocol) architecture, acting as a br
 | Storage Layer | SQLite database wrapper for CRUD and audit logging | `src/storage/db.ts` |
 | Config Manager | Configuration file loading and validation | `src/config.ts` |
 | Browser Automation | Playwright and Puppeteer integration for web tasks | `src/tools/browser/` |
-| Diff Tools | Intelligent file diffing and text replacement | `src/tools/diff/` |
+| Diff Tools | Intelligent file diffing, batch editing, line replacement | `src/tools/diff/` |
+| Batch Dispatcher | Generic batch execution for any tool with safety limits | `src/tools/batchDispatcher.ts` |
 | Analytics | Tool usage tracking and performance metrics | `src/tools/analytics.ts` |
 
 ### Data Flow
@@ -82,7 +85,7 @@ Batch Tool Call → Promise.all(operations) → Aggregate Results → Summary + 
 
 ### Public Interfaces
 
-The server exposes 62 tools organized by category. All tools use Zod schemas for validation and JSON Schema for MCP protocol compliance.
+The server exposes **100 tools** organized by category. All tools use Zod schemas for validation and JSON Schema for MCP protocol compliance.
 
 #### Tool Category: CLI & File Operations (17 tools)
 
@@ -336,6 +339,76 @@ The server exposes 62 tools organized by category. All tools use Zod schemas for
   - `message` (string): Notification body text
 - **Returns**: Confirmation message
 
+#### Tool Category: Generic Batch Operations (1 tool)
+
+#### Tool: `batch_tools`
+- **Purpose**: Universal batch dispatcher that can execute ANY tool in batch mode with unified safety limits
+- **Parameters**:
+  - `operations` (array): Array of `{tool, args, label?}` objects specifying tools to execute
+  - `executionMode` (string, optional): `"parallel"` (default) or `"sequential"`
+  - `stopOnError` (boolean, optional): Stop sequential execution on first error (default: false)
+  - `timeout` (number, optional): Per-operation timeout in milliseconds
+  - `safetyLimits` (object, optional): Override default limits `{maxOperations, maxAggregateChars, maxLinesPerFile}`
+- **Returns**: Summary object with `total`, `successful`, `failed`, `elapsed_ms`, `warnings` plus individual results
+- **Safety Limits**:
+  - `maxOperations`: 50 (max operations per batch)
+  - `maxAggregateChars`: 200000 (total output size limit)
+  - `maxLinesPerFile`: 500 (per-file line truncation)
+  - `timeout`: 30000 (per-operation timeout in ms)
+
+#### Tool Category: Diff-Based Editing (5 tools)
+
+#### Tool: `edit_block`
+- **Purpose**: Search/replace with fuzzy matching fallback when exact match fails
+- **Parameters**:
+  - `path` (string): File path to edit
+  - `search` (string): Text to search for
+  - `replace` (string): Replacement text
+  - `expectedReplacements` (number, optional): Expected occurrences (default: 1)
+  - `dryRun` (boolean, optional): Preview changes without applying
+  - `fuzzyThreshold` (number, optional): Similarity threshold for fuzzy matching (default: 0.7)
+- **Returns**: Object with success status, diff preview, and match information
+
+#### Tool: `batch_edit_blocks`
+- **Purpose**: Apply multiple search/replace operations to a single file sequentially with partial success support
+- **Parameters**:
+  - `path` (string): File path to edit
+  - `edits` (array): Array of `{search, replace, label?, expectedReplacements?}` objects
+  - `stopOnError` (boolean, optional): Stop on first failure, save completed work (default: false)
+  - `dryRun` (boolean, optional): Preview changes without applying (default: false)
+  - `fuzzyThreshold` (number, optional): Similarity threshold (default: 0.7)
+- **Returns**: Object with `success`, `totalEdits`, `successfulEdits`, `failedEdits`, per-edit `results`, and `finalDiff`
+
+#### Tool: `write_from_line`
+- **Purpose**: Replace content starting from a specific line number to EOF or specified endLine
+- **Parameters**:
+  - `path` (string): File path to edit
+  - `startLine` (number): First line to replace (1-indexed, inclusive)
+  - `endLine` (number, optional): Last line to replace (1-indexed). If omitted, replaces to EOF
+  - `content` (string): New content to write
+  - `dryRun` (boolean, optional): Preview changes without applying (default: false)
+- **Returns**: Object with `success`, `message`, `linesReplaced`, `newLineCount`, and `diff`
+
+#### Tool: `apply_diff`
+- **Purpose**: Apply multiple search/replace blocks to a file atomically
+- **Parameters**:
+  - `path` (string): File path to edit
+  - `diffs` (array): Array of `{search, replace, startLine?}` blocks
+  - `dryRun` (boolean, optional): Preview changes without applying
+  - `allowFuzzy` (boolean, optional): Allow fuzzy matching fallback (default: true)
+  - `fuzzyThreshold` (number, optional): Similarity threshold (default: 0.7)
+- **Returns**: Diff preview and success status
+
+#### Tool: `get_diff_preview`
+- **Purpose**: Generate diff preview without modifying file
+- **Parameters**:
+  - `path` (string): File path
+  - `search` (string): Text to search for
+  - `replace` (string): Replacement text
+  - `format` (string, optional): `"unified"`, `"inline"`, or `"sidebyside"` (default: unified)
+  - `contextLines` (number, optional): Lines of context around changes (default: 3)
+- **Returns**: Formatted diff preview
+
 ### Configuration
 
 | Variable | Type | Default | Description |
@@ -346,6 +419,13 @@ The server exposes 62 tools organized by category. All tools use Zod schemas for
 | `cliPolicy.extraBlockedPatterns` | array | `[]` | Additional regex patterns to block in CLI commands |
 | `cliPolicy.timeoutMs` | number | `30000` | Default timeout for CLI command execution |
 | `crud.defaultLimit` | number | `1000` | Default query result limit for CRUD operations |
+| `fileReading.maxLines` | number | `500` | Maximum lines to read per file in batch operations |
+| `fileReading.warnAtLines` | number | `100` | Warn when file exceeds this many lines |
+| `batchOperations.maxOperations` | number | `50` | Maximum operations per batch_tools call |
+| `batchOperations.maxAggregateChars` | number | `200000` | Total output size limit for batch results |
+| `batchOperations.maxLinesPerFile` | number | `500` | Per-file line truncation in batch reads |
+| `batchOperations.defaultTimeout` | number | `30000` | Per-operation timeout in milliseconds |
+| `batchOperations.toolLimits` | object | `{}` | Per-tool limit overrides (e.g., `{"exec_cli": {"maxOperations": 20}}`) |
 
 Configuration file location: `~/.mcp/config.json` (optional)
 
@@ -667,10 +747,10 @@ dist/storage/ (compiled storage modules)
 
 | Metric | Status |
 |--------|--------|
-| Tests | Partial (manual test scripts, no automated test suite) |
+| Tests | Automated tests for diff tools (batchEditBlocks, writeFromLine) |
 | Linting | None configured |
 | Type Safety | TypeScript strict mode enabled |
-| Documentation | JSDoc comments on major functions, comprehensive README |
+| Documentation | JSDoc comments on major functions, comprehensive README, ADRs |
 
 ---
 
@@ -701,9 +781,16 @@ mnehmos.ooda.mcp/
 │   │   ├── diff/                # File diffing and intelligent text replacement
 │   │   │   ├── index.ts         # Diff tool exports
 │   │   │   ├── applyDiff.ts     # Apply diff patches to files
-│   │   │   ├── editBlock.ts     # Block-based editing
+│   │   │   ├── editBlock.ts     # Block-based editing with fuzzy matching
+│   │   │   ├── batchEditBlocks.ts # Sequential multi-edit with partial success
+│   │   │   ├── writeFromLine.ts # Bulk line replacement from line N
 │   │   │   ├── fuzzySearch.ts   # Fuzzy string matching for resilient edits
-│   │   │   └── schemas.ts       # Zod schemas for diff operations
+│   │   │   ├── diffVisualizer.ts # Diff formatting and visualization
+│   │   │   ├── lineEndings.ts   # Line ending detection and normalization
+│   │   │   ├── schemas.ts       # Zod schemas for diff operations
+│   │   │   └── *.test.ts        # Unit tests for diff tools
+│   │   ├── batchDispatcher.ts   # Generic batch tool executor with safety limits
+│   │   ├── batchTools.ts        # Batch tool schema exports
 │   │   ├── analytics.ts         # Tool usage analytics and metrics
 │   │   ├── configTools.ts       # Runtime config query tools
 │   │   ├── executeCode.ts       # Dynamic code execution (eval)
@@ -712,6 +799,9 @@ mnehmos.ooda.mcp/
 │   └── utils/
 │       └── powerShellSession.ts # PowerShell session pooling for Windows
 ├── dist/                        # Compiled JavaScript output (gitignored)
+├── docs/                        # Documentation and architecture decision records
+│   ├── ADR-002-batch-editing-tools.md # ADR for batch_edit_blocks, write_from_line
+│   └── ADR-003-generic-batch-tools.md # ADR for batch_tools dispatcher
 ├── package.json                 # npm package manifest with dependencies
 ├── tsconfig.json                # TypeScript compiler configuration
 ├── README.md                    # User-facing documentation
