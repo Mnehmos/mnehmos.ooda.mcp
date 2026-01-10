@@ -149,8 +149,8 @@ async function listWindowsWin32(): Promise<WindowInfo[]> {
         } catch (parseError) {
              return [];
         }
-    } catch (error: any) {
-        console.error('List Windows Error:', error);
+    } catch {
+        // List windows failed - return empty list
         return [];
     }
 }

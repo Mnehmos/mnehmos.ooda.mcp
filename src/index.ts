@@ -907,8 +907,8 @@ async function main() {
 
         const transport = new StdioServerTransport();
         await server.connect(transport);
-        console.error('MCP OODA Computer Server v2.0.0 running on stdio');
-        console.error('Tools: CLI, CRUD, Filesystem, Screen, Input, Window, Clipboard, System');
+        console.error('MCP OODA Computer Server v1.0.0 running on stdio');
+        console.error('Tools: CLI, CRUD, Filesystem, Screen, Input, Window, Clipboard, System, Browser, Sessions');
     } catch (error) {
         console.error('Failed to start server:', error);
         process.exit(1);

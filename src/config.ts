@@ -107,8 +107,9 @@ export function loadConfig(): Config {
                 },
             };
         }
-    } catch (error) {
-        console.error('Failed to load config, using defaults:', error);
+    } catch {
+        // Config load failed - silently use defaults
+        // (can't audit log here as config is needed for audit path)
     }
 
     return DEFAULT_CONFIG;

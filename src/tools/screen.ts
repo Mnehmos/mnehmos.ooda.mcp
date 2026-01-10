@@ -104,7 +104,8 @@ async function captureScreen(options: {
                 : '';
             try {
                 await execAsync(`scrot ${regionArgs} "${tempPath}"`, { timeout: 10000 });
-            } catch {
+            } catch (scrotError) {
+                // scrot not available, try gnome-screenshot as fallback
                 await execAsync(`gnome-screenshot -f "${tempPath}"`, { timeout: 10000 });
             }
         }

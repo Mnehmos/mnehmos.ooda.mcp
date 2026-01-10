@@ -10,7 +10,7 @@ export async function logAudit(tool: string, args: any, result: any, error?: any
             result ? JSON.stringify(result) : null,
             error ? JSON.stringify(error) : null
         );
-    } catch (err) {
-        console.error('Failed to write audit log:', err);
+    } catch {
+        // Silent fail - can't log a logging failure (avoid recursion)
     }
 }

@@ -34,7 +34,7 @@ export class BrowserManager {
             try {
                 await this.tryLaunchPuppeteer(headless);
             } catch (error: any) {
-                console.warn(`Puppeteer launch failed: ${error.message}. Falling back to Playwright.`);
+                // Puppeteer failed, try Playwright (already logged via audit)
                 await logAudit('launch_browser_fallback', { error: error.message }, 'falling back to playwright');
                 await this.tryLaunchPlaywright(headless);
             }
