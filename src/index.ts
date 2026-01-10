@@ -188,7 +188,7 @@ import {
 const server = new Server(
     {
         name: 'mnehmos.ooda.mcp',
-        version: '1.0.3',
+        version: '1.0.4',
     },
     {
         capabilities: {
@@ -907,7 +907,7 @@ async function main() {
 
         const transport = new StdioServerTransport();
         await server.connect(transport);
-        console.error('MCP OODA Computer Server v1.0.3 running on stdio');
+        console.error('MCP OODA Computer Server v1.0.4 running on stdio');
         console.error('Tools: CLI, CRUD, Filesystem, Screen, Input, Window, Clipboard, System, Browser, Sessions');
     } catch (error) {
         console.error('Failed to start server:', error);

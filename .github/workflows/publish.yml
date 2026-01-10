@@ -34,9 +34,10 @@ jobs:
         run: npm test
         continue-on-error: true
 
-      # Uses OIDC via Trusted Publisher - no NPM_TOKEN needed!
       - name: Publish to npm
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
         run: |

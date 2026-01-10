@@ -1,6 +1,6 @@
 {
     "name": "mnehmos.ooda.mcp",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "type": "module",
     "description": "MCP server for full computer control - OODA loop enabled. CLI, CRUD, Filesystem, Screen capture, Input simulation, Window management, Clipboard, and System operations.",
     "main": "dist/index.js",
