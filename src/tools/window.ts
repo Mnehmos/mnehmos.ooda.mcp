@@ -250,34 +250,8 @@ async function getActiveWindowWin32(): Promise<WindowInfo | null> {
 }
 
 async function focusWindowWin32(title?: string, pid?: number): Promise<boolean> {
+    // Uses WindowFocusEnumerator to find windows by partial title match
     const script = `
-        ${EnsureWindowFocusScript}
-        $hWnd = [IntPtr]::Zero
-        
-        # Try to find by title match in all visible windows first
-        if ("${title}") {
-             if (-not ("WindowEnumerator" -as [type])) { /* Ensure enumerator exists if not already */ } 
-             # Re-use WindowEnumerator logic specifically? Or just use simplistic Get-Process for main windows?
-             # Actually, better to use WindowEnumerator to find the handle!
-        }
-        
-        # Simplified for now: Use Get-Process for main windows, or if that fails, try exact handle?
-        # But we want to focus popups too.
-        
-        $proc = Get-Process | Where-Object { $_.MainWindowTitle -like "*${title}*" } | Select-Object -First 1
-        if ($proc) {
-            [WindowFocus]::ShowWindow($proc.MainWindowHandle, 9)
-            [WindowFocus]::SetForegroundWindow($proc.MainWindowHandle)
-            Write-Output "true"
-        } else {
-            # Fallback: maybe it's a dialog not attached to MainWindowHandle?
-            # Implemented simple main window focus for now.
-            Write-Output "false"
-        }
-    `;
-    
-    // Updated robust logic
-    const scriptRobust = `
         ${EnsureWindowFocusScript}
         
         $targetTitle = "${title}"
@@ -327,7 +301,7 @@ async function focusWindowWin32(title?: string, pid?: number): Promise<boolean> 
     `;
 
     try {
-        const stdout = await PowerShellSession.getInstance().execute(scriptRobust);
+        const stdout = await PowerShellSession.getInstance().execute(script);
         return stdout.trim() === 'true';
     } catch {
         return false;
@@ -863,11 +837,7 @@ export async function handleWaitForWindow(args: { title: string; timeout?: numbe
                 Add-Type -TypeDefinition $source -ReferencedAssemblies "UIAutomationClient","UIAutomationTypes","System.Core"
             }
             
-            # Since native C# FindWindow helper above was stubbed, we do a quick PowerShell pre-check
-            # Actually, let's just let the C# waiter run. If it misses existing, we might wait unnecessary time.
-            # Ideally we combine them. For now, rely on list_windows loop as fallback if C# returns error?
-            # No, let's implement the full C# Wait including the scan.
-            
+            # Use C# WindowWaiter for UIA-based window detection
             [WindowWaiter]::WaitForWindow("${args.title}", ${timeout}) | ConvertTo-Json -Depth 2
         `;
         
