@@ -1,5 +1,6 @@
-# mnehmos.ooda.mcp (v3.0.0)
+# mnehmos.ooda.mcp (v1.0.0)
 
+[![npm version](https://img.shields.io/npm/v/mnehmos.ooda.mcp.svg)](https://www.npmjs.com/package/mnehmos.ooda.mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A comprehensive MCP (Model Context Protocol) server that provides full computer control capabilities to Claude. Implements the OODA loop (Observe-Orient-Decide-Act) pattern for autonomous computer interaction.
@@ -36,6 +37,14 @@ This server provides **unrestricted system access**. Claude will be able to:
 
 ## Installation
 
+### From npm (Recommended)
+
+```bash
+npm install -g mnehmos.ooda.mcp
+```
+
+### From Source
+
 ```bash
 git clone https://github.com/Mnehmos/mnehmos.ooda.mcp.git
 cd mnehmos.ooda.mcp
@@ -49,6 +58,21 @@ Add to your Claude Desktop config file:
 
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+### If installed via npm:
+
+```json
+{
+  "mcpServers": {
+    "ooda-computer": {
+      "command": "npx",
+      "args": ["mnehmos.ooda.mcp"]
+    }
+  }
+}
+```
+
+### If installed from source:
 
 ```json
 {
