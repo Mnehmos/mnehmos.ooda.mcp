@@ -1,11 +1,12 @@
 // Diff tools module - exports all diff editing functionality
-// Provides edit_block, apply_diff, and get_diff_preview tools
+// Provides edit_block, apply_diff, get_diff_preview, batch_edit_blocks, and write_from_line tools
 
 export {
     EditBlockSchema,
     ApplyDiffSchema,
     GetDiffPreviewSchema,
-    BatchEditBlocksSchema
+    BatchEditBlocksSchema,
+    WriteFromLineSchema
 } from './schemas.js';
 
 export { handleEditBlock } from './editBlock.js';
@@ -16,6 +17,12 @@ export type { ApplyDiffArgs, ApplyDiffResult, DiffBlock } from './applyDiff.js';
 
 export { handleGetDiffPreview } from './getDiffPreview.js';
 export type { GetDiffPreviewArgs, GetDiffPreviewResult } from './getDiffPreview.js';
+
+export { handleBatchEditBlocks, handleBatchEditBlocksMcp } from './batchEditBlocks.js';
+export type { BatchEditBlocksArgs, BatchEditBlocksResult } from './batchEditBlocks.js';
+
+export { handleWriteFromLine, handleWriteFromLineMcp } from './writeFromLine.js';
+export type { WriteFromLineArgs, WriteFromLineResult } from './writeFromLine.js';
 
 export {
     generateDiff,

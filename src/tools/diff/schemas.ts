@@ -48,22 +48,37 @@ export const GetDiffPreviewSchema = {
 };
 
 /**
- * Schema for batch_edit_blocks tool - multiple files or multiple edits
+ * Schema for batch_edit_blocks tool - multiple sequential edits on a single file
  */
 export const BatchEditBlocksSchema = {
+    path: z.string().describe('Absolute path to the file to edit'),
     edits: z.array(z.object({
-        path: z.string().describe('Absolute path to the file to edit'),
         search: z.string().describe('Text to search for'),
         replace: z.string().describe('Text to replace with'),
+        label: z.string().optional().describe('Optional identifier for progress tracking'),
         expectedReplacements: z.number().optional().default(1)
-            .describe('Expected number of occurrences'),
-    })).describe('Array of edit operations to perform'),
-    dryRun: z.boolean().optional().default(false)
-        .describe('If true, returns diff previews without applying changes'),
+            .describe('Expected number of occurrences to replace'),
+    })).describe('Array of edit operations to apply sequentially'),
     stopOnError: z.boolean().optional().default(false)
-        .describe('If true, stops execution when an edit fails'),
+        .describe('If true, stops execution when an edit fails and saves completed work'),
+    dryRun: z.boolean().optional().default(false)
+        .describe('If true, returns diff preview without modifying file'),
     fuzzyThreshold: z.number().optional().default(0.7)
-        .describe('Similarity threshold for fuzzy matching'),
+        .describe('Similarity threshold (0-1) for fuzzy fallback when exact match fails'),
+};
+
+/**
+ * Schema for write_from_line tool - bulk line replacement
+ * Replaces content from startLine to endLine (or EOF) with new content
+ */
+export const WriteFromLineSchema = {
+    path: z.string().describe('Absolute path to the file to edit'),
+    startLine: z.number().min(1).describe('Starting line number (1-indexed, inclusive). Content from this line forward will be replaced.'),
+    endLine: z.number().min(1).optional()
+        .describe('Optional ending line number (1-indexed, inclusive). If omitted, replaces from startLine to end of file.'),
+    content: z.string().describe('New content to insert at the specified line range'),
+    dryRun: z.boolean().optional().default(false)
+        .describe('If true, returns a diff preview without applying changes'),
 };
 
 // Type exports for handler functions
@@ -71,3 +86,4 @@ export type EditBlockArgs = z.infer<z.ZodObject<typeof EditBlockSchema>>;
 export type ApplyDiffArgs = z.infer<z.ZodObject<typeof ApplyDiffSchema>>;
 export type GetDiffPreviewArgs = z.infer<z.ZodObject<typeof GetDiffPreviewSchema>>;
 export type BatchEditBlocksArgs = z.infer<z.ZodObject<typeof BatchEditBlocksSchema>>;
+export type WriteFromLineArgs = z.infer<z.ZodObject<typeof WriteFromLineSchema>>;

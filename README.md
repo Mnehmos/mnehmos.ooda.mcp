@@ -1,4 +1,4 @@
-# mnehmos.ooda.mcp (v2.0.0)
+# mnehmos.ooda.mcp (v3.0.0)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -8,15 +8,20 @@ A comprehensive MCP (Model Context Protocol) server that provides full computer 
 
 | Category | Tools | Description |
 |----------|-------|-------------|
-| **CLI & Files** | 17 | Shell commands, file read/write/copy/move/delete, search |
+| **CLI & Files** | 23 | Shell commands, file read/write/copy/move/delete, search, diff editing |
 | **CRUD Database** | 9 | Persistent SQLite key-value store with collections |
 | **Screen (Observe)** | 4 | Screenshot, display info, screen change detection |
 | **Input (Act)** | 10 | Keyboard typing/shortcuts, mouse move/click/drag/scroll |
-| **Window Management** | 10 | List/focus/minimize/maximize/close windows, launch apps |
+| **Window Management** | 11 | List/focus/minimize/maximize/close windows, launch apps |
 | **Clipboard** | 4 | Read/write text, HTML, images |
 | **System** | 8 | System info, processes, network, notifications |
+| **Browser** | 9 | Puppeteer/Playwright automation |
+| **Sessions** | 5 | Interactive process sessions (REPLs, SSH) |
+| **Config & Analytics** | 7 | Configuration management, usage stats |
+| **Search** | 4 | Paginated file search |
+| **Generic Batch** | 1 | Universal batch dispatcher for any tool |
 
-**Total: 62 tools** with batch/parallel execution support for most operations.
+**Total: 100 tools** with batch/parallel execution support for most operations.
 
 ## Security Warning
 
@@ -50,7 +55,7 @@ Add to your Claude Desktop config file:
   "mcpServers": {
     "ooda-computer": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-ooda-computer/dist/index.js"]
+      "args": ["/absolute/path/to/mnehmos.ooda.mcp/dist/index.js"]
     }
   }
 }
@@ -84,6 +89,44 @@ The tools are designed around the OODA (Observe-Orient-Decide-Act) loop:
 - `clipboard_write` - Set clipboard content
 - `notify` - System notifications
 
+## Generic Batch Dispatcher
+
+The `batch_tools` dispatcher can execute ANY tool in batch mode with unified safety limits:
+
+```json
+{
+  "tool": "batch_tools",
+  "args": {
+    "operations": [
+      { "tool": "read_file", "args": { "path": "src/index.ts" }, "label": "main" },
+      { "tool": "file_info", "args": { "path": "package.json" }, "label": "pkg" },
+      { "tool": "exec_cli", "args": { "command": "git status --short" }, "label": "git" }
+    ],
+    "executionMode": "parallel"
+  }
+}
+```
+
+### Execution Modes
+
+| Mode | Description |
+|------|-------------|
+| `parallel` | All operations run concurrently (default) |
+| `sequential` | Operations run one after another, supports `stopOnError` |
+
+### Safety Limits
+
+Configurable via `~/.mcp/config.json` or per-request:
+
+| Limit | Default | Description |
+|-------|---------|-------------|
+| `maxOperations` | 50 | Max operations per batch |
+| `maxAggregateChars` | 200000 | Total output size limit |
+| `maxLinesPerFile` | 500 | Per-file line truncation |
+| `timeout` | 30000 | Per-operation timeout (ms) |
+
+See [ADR-003](docs/ADR-003-generic-batch-tools.md) for full documentation.
+
 ## API Reference
 
 ### CLI & File Operations
@@ -94,12 +137,25 @@ The tools are designed around the OODA (Observe-Orient-Decide-Act) loop:
 | `read_file` | Read file contents |
 | `write_file` | Write content to file |
 | `list_directory` | List directory contents |
+| `read_file_lines` | Read specific line range (token-efficient) |
+| `search_in_file` | Search patterns within a file |
+| `str_replace` | Replace unique string in file |
 | `copy_file` | Copy file/directory |
 | `move_file` | Move/rename file |
 | `delete_file` | Delete file/directory |
 | `file_info` | Get file metadata |
 | `search_files` | Search files by pattern |
 | `batch_*` | Parallel versions of above |
+
+### Diff-Based Editing
+
+| Tool | Description |
+|------|-------------|
+| `edit_block` | Search/replace with fuzzy matching fallback |
+| `apply_diff` | Multiple search/replace in atomic operation |
+| `get_diff_preview` | Preview changes without applying |
+| `batch_edit_blocks` | Sequential edits with partial success |
+| `write_from_line` | Replace content from line N to EOF |
 
 ### CRUD Operations
 
@@ -150,6 +206,7 @@ The tools are designed around the OODA (Observe-Orient-Decide-Act) loop:
 | `resize_window` | Resize window |
 | `move_window` | Move window position |
 | `launch_application` | Start application |
+| `wait_for_window` | Wait for window to appear |
 
 ### Clipboard Operations
 
@@ -173,9 +230,33 @@ The tools are designed around the OODA (Observe-Orient-Decide-Act) loop:
 | `wait` | Sleep for milliseconds |
 | `notify` | System notification |
 
+### Browser Automation
+
+| Tool | Description |
+|------|-------------|
+| `launch_browser` | Start Puppeteer/Playwright browser |
+| `close_browser` | Close browser instance |
+| `navigate_page` | Navigate to URL |
+| `get_page_content` | Get page HTML/text/markdown |
+| `click_element` | Click element by selector |
+| `type_text` | Type into input field |
+| `evaluate_js` | Execute JavaScript |
+| `screenshot_page` | Capture page screenshot |
+| `get_console_logs` | Get browser console logs |
+
+### Interactive Sessions
+
+| Tool | Description |
+|------|-------------|
+| `start_process` | Start interactive process (REPL, SSH) |
+| `interact_with_process` | Send input to process |
+| `read_process_output` | Read process stdout |
+| `list_sessions` | List active sessions |
+| `terminate_process` | End process session |
+
 ## Batch Operations
 
-Most tools have batch versions for parallel execution:
+Most tools have dedicated batch versions for parallel execution:
 
 ```
 batch_exec_cli      - Multiple commands in parallel
@@ -185,6 +266,8 @@ batch_copy_files    - Multiple copies in parallel
 crud_batch_create   - Multiple records in parallel
 ...
 ```
+
+Or use the generic `batch_tools` dispatcher to batch ANY tool.
 
 Batch operations return structured results:
 ```json
@@ -226,6 +309,19 @@ Optional config file at `~/.mcp/config.json`:
   },
   "crud": {
     "defaultLimit": 1000
+  },
+  "fileReading": {
+    "maxLines": 500,
+    "warnAtLines": 100
+  },
+  "batchOperations": {
+    "maxOperations": 50,
+    "maxAggregateChars": 200000,
+    "maxLinesPerFile": 500,
+    "defaultTimeout": 30000,
+    "toolLimits": {
+      "exec_cli": { "maxOperations": 20, "timeout": 60000 }
+    }
   }
 }
 ```
@@ -236,6 +332,7 @@ Optional config file at `~/.mcp/config.json`:
 npm install      # Install dependencies
 npm run build    # Build TypeScript
 npm run dev      # Watch mode
+npm test         # Run tests
 npm start        # Run server
 ```
 

@@ -127,8 +127,15 @@ import {
 import {
     handleEditBlock, EditBlockSchema,
     handleApplyDiff, ApplyDiffSchema,
-    handleGetDiffPreview, GetDiffPreviewSchema
+    handleGetDiffPreview, GetDiffPreviewSchema,
+    handleBatchEditBlocks, BatchEditBlocksSchema,
+    handleWriteFromLine, WriteFromLineSchema
 } from './tools/diff/index.js';
+
+// Generic Batch Tools
+import {
+    handleBatchTools, BatchToolsSchema
+} from './tools/batchTools.js';
 
 // Interactive Process Sessions
 import {
@@ -331,6 +338,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 name: 'get_diff_preview',
                 description: 'Generate a diff preview showing what changes would be made without applying them. Supports unified, inline (character-level), and side-by-side formats.',
                 inputSchema: toJsonSchema(GetDiffPreviewSchema, ['path', 'search', 'replace']),
+            },
+            {
+                name: 'batch_edit_blocks',
+                description: 'Apply multiple search/replace operations to a single file sequentially. Each edit operates on the result of the previous edit. Supports partial success - completed edits are saved even if later edits fail. Use stopOnError to halt on first failure. Use dryRun for preview.',
+                inputSchema: toJsonSchema(BatchEditBlocksSchema, ['path', 'edits']),
+            },
+            {
+                name: 'write_from_line',
+                description: 'Replace content starting from a specific line number. Use startLine to keep lines 1-(startLine-1) and replace from startLine to EOF (or to endLine if specified). Ideal for bulk section replacement in large files without sending entire file content.',
+                inputSchema: toJsonSchema(WriteFromLineSchema, ['path', 'startLine', 'content']),
+            },
+            {
+                name: 'batch_tools',
+                description: 'Execute multiple tool operations in parallel or sequential mode. Can batch ANY tool type (read_file, exec_cli, create_directory, etc.) with unified safety limits. Each operation: {tool: "tool_name", args: {...}}. Enforces: 500 lines/file, 50 ops max, 200KB aggregate (configurable via ~/.mcp/config.json). Use executionMode="parallel" (default) for concurrent execution or "sequential" for ordered execution with stopOnError support.',
+                inputSchema: toJsonSchema(BatchToolsSchema, ['operations']),
             },
 
             // ==========================================
@@ -773,6 +795,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         case 'edit_block': return handleEditBlock(args as any) as any;
         case 'apply_diff': return handleApplyDiff(args as any) as any;
         case 'get_diff_preview': return handleGetDiffPreview(args as any) as any;
+        case 'batch_edit_blocks': return handleBatchEditBlocks(args as any) as any;
+        case 'write_from_line': return handleWriteFromLine(args as any) as any;
+
+        // Generic batch tools
+        case 'batch_tools': return handleBatchTools(args as any) as any;
 
         // Interactive process sessions
         case 'start_process': return handleStartProcess(args as any) as any;

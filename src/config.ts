@@ -24,6 +24,21 @@ export interface Config {
         warnAtChars: number;     // Show warning when output exceeds this (default: 10000)
         truncateMode: 'head' | 'tail' | 'both';  // Where to keep content when truncating
     };
+    batchOperations: {
+        maxOperations: number;          // Max operations per batch (default: 50)
+        maxAggregateChars: number;      // Total chars across batch (default: 200000)
+        maxLinesPerFile: number;        // Per-file line limit (default: 500)
+        defaultTimeout: number;         // Per-operation timeout ms (default: 30000)
+        defaultExecutionMode: 'parallel' | 'sequential';
+        // Per-tool overrides
+        toolLimits: {
+            [toolName: string]: {
+                maxOperations?: number;
+                maxLinesPerFile?: number;
+                timeout?: number;
+            };
+        };
+    };
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -48,6 +63,22 @@ const DEFAULT_CONFIG: Config = {
         warnAtChars: 10000,
         truncateMode: 'both',   // Keep head and tail for context
     },
+    batchOperations: {
+        maxOperations: 50,
+        maxAggregateChars: 200000,        // ~50k tokens
+        maxLinesPerFile: 500,             // Match fileReading.maxLines
+        defaultTimeout: 30000,
+        defaultExecutionMode: 'parallel',
+        toolLimits: {
+            'exec_cli': {
+                maxOperations: 20,        // CLI expensive
+                timeout: 60000,
+            },
+            'batch_read_files': {
+                maxLinesPerFile: 500,
+            },
+        }
+    },
 };
 
 export function loadConfig(): Config {
@@ -66,6 +97,14 @@ export function loadConfig(): Config {
                 crud: { ...DEFAULT_CONFIG.crud, ...userConfig.crud },
                 fileReading: { ...DEFAULT_CONFIG.fileReading, ...userConfig.fileReading },
                 cliOutput: { ...DEFAULT_CONFIG.cliOutput, ...userConfig.cliOutput },
+                batchOperations: {
+                    ...DEFAULT_CONFIG.batchOperations,
+                    ...userConfig.batchOperations,
+                    toolLimits: {
+                        ...DEFAULT_CONFIG.batchOperations.toolLimits,
+                        ...userConfig.batchOperations?.toolLimits
+                    }
+                },
             };
         }
     } catch (error) {
@@ -139,4 +178,27 @@ export function updateConfigValue(keyPath: string, value: any): Config {
  */
 export function getDefaultConfig(): Config {
     return { ...DEFAULT_CONFIG };
+}
+
+/**
+ * Get batch operation safety limits with optional per-tool overrides
+ * @param toolName - Optional tool name to get tool-specific overrides
+ * @returns Safety limits configuration
+ */
+export function getBatchSafetyLimits(toolName?: string): {
+    maxOperations: number;
+    maxLinesPerFile: number;
+    maxAggregateChars: number;
+    timeout: number;
+} {
+    const config = loadConfig();
+    const batchConfig = config.batchOperations;
+    const toolOverrides = toolName ? (batchConfig.toolLimits[toolName] || {}) : {};
+
+    return {
+        maxOperations: toolOverrides.maxOperations ?? batchConfig.maxOperations,
+        maxLinesPerFile: toolOverrides.maxLinesPerFile ?? batchConfig.maxLinesPerFile,
+        maxAggregateChars: batchConfig.maxAggregateChars,
+        timeout: toolOverrides.timeout ?? batchConfig.defaultTimeout,
+    };
 }

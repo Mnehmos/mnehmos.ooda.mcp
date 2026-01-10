@@ -9,6 +9,16 @@ test/
 tests/
 *.test.js
 *.spec.js
+*.test.ts
+*.spec.ts
+test_*.txt
+test_*.js
+
+# Test artifacts
+demo_output/
+*.vbs
+coverage/
+.nyc_output/
 
 # Development files
 .vscode/
@@ -20,6 +30,7 @@ tests/
 .git/
 .gitignore
 .gitattributes
+.claude/
 
 # CI/CD
 .github/
@@ -37,3 +48,6 @@ samples/
 *.log
 .DS_Store
 Thumbs.db
+*.db
+*.db-journal
+*.db-wal

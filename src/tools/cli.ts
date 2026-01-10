@@ -623,17 +623,57 @@ export async function handleBatchExecCli(args: { commands: Array<{ command: stri
 
 export async function handleBatchReadFiles(args: { paths: string[] }) {
     const startTime = Date.now();
+    const config = loadConfig();
+    const maxLinesPerFile = config.batchOperations?.maxLinesPerFile ??
+                            config.fileReading?.maxLines ?? 500;
+    const maxAggregateChars = config.batchOperations?.maxAggregateChars ?? 200000;
 
     const results = await Promise.all(
         args.paths.map(async (filePath, index): Promise<BatchResult> => {
             try {
                 const content = fs.readFileSync(filePath, 'utf-8');
-                return { index, success: true, result: { path: filePath, content } };
+                const lines = content.split('\n');
+                const totalLines = lines.length;
+
+                let output = content;
+                let truncated = false;
+
+                if (totalLines > maxLinesPerFile) {
+                    output = lines.slice(0, maxLinesPerFile).join('\n');
+                    truncated = true;
+                }
+
+                return {
+                    index,
+                    success: true,
+                    result: {
+                        path: filePath,
+                        content: output,
+                        totalLines,
+                        truncated,
+                        ...(truncated && {
+                            warning: `File truncated at ${maxLinesPerFile} of ${totalLines} lines. Adjust via config.batchOperations.maxLinesPerFile`
+                        })
+                    }
+                };
             } catch (error: any) {
                 return { index, success: false, error: `${filePath}: ${error.message}` };
             }
         })
     );
+
+    // Check aggregate size
+    const totalChars = results
+        .filter(r => r.success)
+        .reduce((sum, r) => sum + (r.result?.content?.length || 0), 0);
+
+    const warnings = [];
+    if (totalChars > maxAggregateChars) {
+        warnings.push(
+            `⚠️  Aggregate size ${totalChars} chars exceeds recommended limit ${maxAggregateChars}. ` +
+            `Consider reading fewer files or using read_file_lines for specific line ranges.`
+        );
+    }
 
     const successful = results.filter(r => r.success).length;
     const failed = results.filter(r => !r.success).length;
@@ -645,7 +685,14 @@ export async function handleBatchReadFiles(args: { paths: string[] }) {
         content: [{
             type: 'text',
             text: JSON.stringify({
-                summary: { total: args.paths.length, successful, failed, elapsed_ms: elapsed },
+                summary: {
+                    total: args.paths.length,
+                    successful,
+                    failed,
+                    elapsed_ms: elapsed,
+                    totalChars,
+                    warnings
+                },
                 results: results.sort((a, b) => a.index - b.index)
             }, null, 2)
         }],

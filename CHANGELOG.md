@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [3.0.0] - 2025-01-10
+
+### Added
+
+#### Generic Batch Dispatcher
+- `batch_tools` - Universal batch dispatcher that can execute ANY tool in batch mode. See [ADR-003](docs/ADR-003-generic-batch-tools.md).
+  - Supports parallel and sequential execution modes
+  - Unified safety limits (maxOperations, maxAggregateChars, maxLinesPerFile)
+  - Configurable per-tool overrides via `~/.mcp/config.json`
+  - Labels for tracking operations in results
+
+#### Diff-Based Editing Tools
+- `batch_edit_blocks` - Apply multiple search/replace operations to a single file sequentially with partial success support. See [ADR-002](docs/ADR-002-batch-editing-tools.md).
+- `write_from_line` - Replace content starting from a specific line number, ideal for bulk section replacement in large files. See [ADR-002](docs/ADR-002-batch-editing-tools.md).
+
+#### Configuration Enhancements
+- `batchOperations` config section with safety limits
+- `getBatchSafetyLimits()` helper for per-tool limit overrides
+- Tool-specific timeout and operation limits
+
+### Changed
+- Tool count increased from 62 to 100
+- Improved batch operation safety with aggregate size warnings
+- Updated documentation with batch_tools examples
+
+### Fixed
+- Replaced console.log with console.error in PowerShell session handler
+
+### Security
+- Batch operations now enforce configurable safety limits
+- Aggregate output size warnings prevent context overflow
+
 ## [2.0.0] - 2025-12-01
 
 ### Added

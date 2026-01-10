@@ -41,7 +41,7 @@ export class PowerShellSession {
         this.process.stderr.on('data', (data) => console.error('PS Stderr:', data.toString()));
         
         this.process.on('close', (code) => {
-            console.log(`PowerShell process exited with code ${code}`);
+            console.error(`PowerShell process exited with code ${code}`);
             this.process = null;
             this.isReady = false;
             // Reject current task if any

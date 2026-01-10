@@ -39,6 +39,13 @@ logs/
 # Testing
 coverage/
 .nyc_output/
+test_*.txt
+test_*.js
+*.test.output
+
+# Test artifacts
+demo_output/
+*.vbs
 
 # Temporary files
 tmp/
