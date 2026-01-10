@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.0] - 2025-01-10
+## [1.0.0] - 2026-01-10 (Production Release)
+
+### Summary
+First production release for npm publication. Consolidates all features from development versions (1.x, 2.x, 3.x).
+
+### Features (100 tools across 12 categories)
+- **CLI & Files**: 18 tools for shell commands and file operations
+- **Diff Editing**: 6 tools for intelligent search/replace with fuzzy matching
+- **CRUD Database**: 9 tools for SQLite key-value storage
+- **Screen**: 4 tools for screenshots, display info, change detection
+- **Input**: 10 tools for keyboard and mouse automation
+- **Window**: 11 tools for window management and application launching
+- **Clipboard**: 4 tools for clipboard operations
+- **System**: 8 tools for process, environment, and network info
+- **Browser**: 9 tools for Puppeteer/Playwright automation
+- **Sessions**: 5 tools for interactive process management
+- **Config/Analytics**: 7 tools for configuration and usage stats
+- **Generic Batch**: Universal `batch_tools` dispatcher for any tool
+
+### Changed
+- Version reset to 1.0.0 for production npm release
+- Server name aligned to `mnehmos.ooda.mcp`
+
+---
+
+## [3.0.0] - 2025-01-10 (Development)
 
 ### Added
 
