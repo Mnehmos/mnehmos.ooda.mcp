@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { loadConfig } from '../config.js';
 import { logAudit } from '../audit.js';
 
@@ -56,16 +57,63 @@ function truncateOutput(output: string, maxChars: number, mode: 'head' | 'tail' 
 export const ExecCliSchema = {
     command: z.string().describe('The command to execute'),
     cwd: z.string().optional().describe('Current working directory for the command'),
+    elevated: z.boolean().optional().describe('Windows only. If true, runs the command with administrator privileges via UAC prompt. LIMITATIONS: fire-and-forget — does NOT return stdout/stderr (the elevated child process runs in a hidden window). Useful for registry writes to HKLM, Program Files operations, and service management. For anything requiring output, run unelevated.'),
 };
 
-export async function handleExecCli(args: { command: string; cwd?: string }) {
-    const { command, cwd } = args;
+export async function handleExecCli(args: { command: string; cwd?: string; elevated?: boolean }) {
+    const { command, cwd, elevated } = args;
     const outputConfig = config.cliOutput ?? { maxOutputChars: 50000, warnAtChars: 10000, truncateMode: 'both' as const };
 
     if (isBlocked(command)) {
         const error = 'Command blocked by safety policy';
         await logAudit('exec_cli', args, null, error);
         throw new Error(error);
+    }
+
+    // Elevated path: fire-and-forget via Start-Process -Verb RunAs (triggers
+    // UAC prompt). We intentionally don't plumb stdout/stderr back because
+    // the elevated child runs in a separate console and capturing its output
+    // would require either a persistent elevated IPC session (not yet
+    // implemented in PowerShellSession) or a file-redirect dance that's
+    // fragile. If you need output from an elevated command, pipe it to a
+    // file and read that file afterward.
+    if (elevated) {
+        if (os.platform() !== 'win32') {
+            const msg = 'elevated=true is only supported on Windows (uses UAC / Start-Process -Verb RunAs)';
+            await logAudit('exec_cli', args, null, msg);
+            return {
+                content: [{ type: 'text', text: `Error: ${msg}` }],
+                isError: true
+            };
+        }
+        try {
+            // We pass the full command as a single -Command argument to a new
+            // powershell.exe instance, so compound commands (| && ;) work.
+            // Use PowerShellSession.execElevatedOneShot helper.
+            const { PowerShellSession } = await import('../utils/powerShellSession.js');
+            await PowerShellSession.execElevatedOneShot('powershell.exe', [
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-Command', command
+            ]);
+            await logAudit('exec_cli', { command, cwd, elevated: true }, { launched: true });
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        launched: true,
+                        elevated: true,
+                        note: 'Elevated command launched via UAC. Output is not captured (architectural limitation). Check side-effects (files, registry, logs) to verify completion.'
+                    }, null, 2)
+                }]
+            };
+        } catch (err: any) {
+            await logAudit('exec_cli', args, null, err.message);
+            return {
+                content: [{ type: 'text', text: `Error launching elevated command: ${err.message}` }],
+                isError: true
+            };
+        }
     }
 
     return new Promise((resolve, reject) => {
@@ -514,11 +562,31 @@ export async function handleStrReplace(args: { path: string; oldText?: string; n
 
         const content = fs.readFileSync(args.path, 'utf-8');
 
-        // Count occurrences
-        const occurrences = content.split(oldStr).length - 1;
+        // Normalize line endings: detect file's convention and apply to search/replace.
+        // Without this, a search string with LF ("\n") will fail to match a file
+        // with CRLF ("\r\n") endings — the #1 cause of "string not found" errors.
+        // The detection/normalization utilities live in diff/ and are the same ones
+        // used by edit_block and apply_diff, keeping behavior consistent.
+        const { detectLineEnding, normalizeLineEndings, describeLineEndingDifference } =
+            await import('./diff/lineEndings.js');
+        const fileLineEnding = detectLineEnding(content);
+        const normalizedOld = normalizeLineEndings(oldStr, fileLineEnding);
+        const normalizedNew = normalizeLineEndings(newStr, fileLineEnding);
+
+        // Count occurrences using normalized search string
+        const occurrences = content.split(normalizedOld).length - 1;
 
         if (occurrences === 0) {
-            const error = `String not found in file: "${oldStr.substring(0, 50)}${oldStr.length > 50 ? '...' : ''}"`;
+            // Surface the most likely cause when the user's string "looks right"
+            // but doesn't match: line-ending mismatch between search and file.
+            const lineEndingHint = describeLineEndingDifference(oldStr, content);
+            const preview = oldStr.substring(0, 50) + (oldStr.length > 50 ? '...' : '');
+            let error = `String not found in file: "${preview}"`;
+            if (lineEndingHint) {
+                error += ` | ${lineEndingHint} (normalization was attempted but content still did not match — the search text may have other differences)`;
+            } else {
+                error += ' | For fuzzy matching and better diagnostics, try edit_block instead';
+            }
             await logAudit('str_replace', args, null, error);
             return {
                 content: [{ type: 'text', text: `Error: ${error}` }],
@@ -535,8 +603,9 @@ export async function handleStrReplace(args: { path: string; oldText?: string; n
             };
         }
 
-        // Replace the string
-        const newContent = content.replace(oldStr, newStr);
+        // Replace using normalized strings so the output preserves the file's
+        // existing line-ending convention.
+        const newContent = content.replace(normalizedOld, normalizedNew);
         fs.writeFileSync(args.path, newContent, 'utf-8');
 
         await logAudit('str_replace', { path: args.path, oldText_length: oldStr.length, newText_length: newStr.length }, 'success');

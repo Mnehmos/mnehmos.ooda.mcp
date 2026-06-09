@@ -48,3 +48,19 @@ export async function getDb(): Promise<Database> {
 
     return dbInstance;
 }
+
+/**
+ * Close the singleton database connection. Primarily used in tests to allow
+ * Node's test runner to exit cleanly after all tests complete — the sqlite
+ * handle keeps the event loop alive otherwise, which suppresses the TAP
+ * summary footer and breaks multi-file test chaining.
+ *
+ * In normal (production) usage the process lifecycle closes this naturally
+ * when the MCP server exits.
+ */
+export async function closeDb(): Promise<void> {
+    if (dbInstance) {
+        await dbInstance.close();
+        dbInstance = null;
+    }
+}

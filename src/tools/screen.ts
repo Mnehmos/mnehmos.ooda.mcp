@@ -121,30 +121,92 @@ async function getDisplayInfo(): Promise<any[]> {
     const platform = os.platform();
 
     if (platform === 'win32') {
+        // Return per-monitor bounds, working area, primary flag, AND per-monitor
+        // DPI. Per-monitor DPI requires GetDpiForMonitor which needs each
+        // monitor's handle; we use EnumDisplayMonitors + GetMonitorInfoEx and
+        // correlate with Screen::AllScreens by device name.
+        //
+        // The process must be PER_MONITOR_AWARE_V2 for the returned bounds to
+        // be in physical pixels (rather than rescaled logical pixels). That's
+        // set at PowerShellSession startup.
         const script = `
             Add-Type -AssemblyName System.Windows.Forms
-            [System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
-                @{
-                    DeviceName = $_.DeviceName
-                    Primary = $_.Primary
+
+            if (-not ("MCP_MonitorDpi" -as [type])) {
+                Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class MCP_MonitorDpi {
+    [DllImport("shcore.dll")]
+    public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X; public int Y; }
+
+    public static uint GetDpiAtPoint(int x, int y) {
+        POINT p; p.X = x; p.Y = y;
+        IntPtr hMon = MonitorFromPoint(p, 2); // MONITOR_DEFAULTTONEAREST
+        uint dpiX, dpiY;
+        int hr = GetDpiForMonitor(hMon, 0, out dpiX, out dpiY); // MDT_EFFECTIVE_DPI
+        if (hr != 0) return 96;
+        return dpiX;
+    }
+}
+"@
+            }
+
+            $screens = [System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
+                $s = $_
+                # Sample a point inside this monitor to get its DPI.
+                $sampleX = $s.Bounds.X + [int]($s.Bounds.Width / 2)
+                $sampleY = $s.Bounds.Y + [int]($s.Bounds.Height / 2)
+                $dpi = 96
+                try { $dpi = [MCP_MonitorDpi]::GetDpiAtPoint($sampleX, $sampleY) } catch {}
+
+                [PSCustomObject]@{
+                    DeviceName = $s.DeviceName
+                    Primary = $s.Primary
                     Bounds = @{
-                        X = $_.Bounds.X
-                        Y = $_.Bounds.Y
-                        Width = $_.Bounds.Width
-                        Height = $_.Bounds.Height
+                        X = $s.Bounds.X
+                        Y = $s.Bounds.Y
+                        Width = $s.Bounds.Width
+                        Height = $s.Bounds.Height
                     }
                     WorkingArea = @{
-                        X = $_.WorkingArea.X
-                        Y = $_.WorkingArea.Y
-                        Width = $_.WorkingArea.Width
-                        Height = $_.WorkingArea.Height
+                        X = $s.WorkingArea.X
+                        Y = $s.WorkingArea.Y
+                        Width = $s.WorkingArea.Width
+                        Height = $s.WorkingArea.Height
                     }
+                    Dpi = [int]$dpi
+                    ScaleFactor = [math]::Round($dpi / 96.0, 3)
                 }
-            } | ConvertTo-Json
+            }
+
+            # Also compute virtual screen bounds so the agent knows the full
+            # coordinate space spanning all monitors (including negative origins).
+            $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+
+            $result = [PSCustomObject]@{
+                Displays = @($screens)
+                VirtualScreen = @{
+                    X = $vs.X
+                    Y = $vs.Y
+                    Width = $vs.Width
+                    Height = $vs.Height
+                }
+            }
+
+            $result | ConvertTo-Json -Depth 5
         `;
         const stdout = await PowerShellSession.getInstance().execute(script);
-        const result = JSON.parse(stdout);
-        return Array.isArray(result) ? result : [result];
+        const parsed = JSON.parse(stdout);
+        // Return a structured object the handler can wrap — we want to preserve
+        // VirtualScreen at the top level, which handleGetScreenInfo will merge in.
+        return parsed as any;
     } else if (platform === 'darwin') {
         const { stdout } = await execAsync(`system_profiler SPDisplaysDataType -json`, { timeout: 5000 });
         const data = JSON.parse(stdout);
@@ -232,9 +294,21 @@ export async function handleScreenshot(args: {
 
 export async function handleGetScreenInfo() {
     try {
-        const displays = await getDisplayInfo();
+        const info = await getDisplayInfo() as any;
 
         await logAudit('get_screen_info', {}, 'success');
+
+        // Windows path returns structured { Displays, VirtualScreen }; other
+        // platforms return a plain display array. Normalize to a single shape
+        // so callers can rely on it regardless of OS.
+        let displays: any[];
+        let virtualScreen: any = null;
+        if (info && typeof info === 'object' && !Array.isArray(info) && info.Displays) {
+            displays = info.Displays;
+            virtualScreen = info.VirtualScreen;
+        } else {
+            displays = Array.isArray(info) ? info : [info];
+        }
 
         return {
             content: [{
@@ -242,7 +316,14 @@ export async function handleGetScreenInfo() {
                 text: JSON.stringify({
                     platform: os.platform(),
                     displayCount: displays.length,
-                    displays
+                    displays,
+                    virtualScreen,
+                    // Hint for agents: use these coordinates when calling
+                    // mouse_click / mouse_move. Negative X or Y means a monitor
+                    // is to the left of / above the primary.
+                    note: virtualScreen
+                        ? `Virtual screen spans (${virtualScreen.X}, ${virtualScreen.Y}) to (${virtualScreen.X + virtualScreen.Width}, ${virtualScreen.Y + virtualScreen.Height}). Clicks must land inside this rectangle.`
+                        : 'Virtual screen bounds not available on this platform.'
                 }, null, 2)
             }],
         };
