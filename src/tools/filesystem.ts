@@ -2,6 +2,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { logAudit } from '../audit.js';
+import { compileGlob, globMatches } from '../utils/glob.js';
 
 // Single operation schemas
 export const CopyFileSchema = {
@@ -190,7 +191,8 @@ export async function handleSearchFiles(args: { directory: string; pattern: stri
         const maxResults = args.maxResults || 100;
         const results: string[] = [];
 
-        const regex = patternToRegex(args.pattern);
+        const glob = compileGlob(args.pattern);
+        const root = args.directory;
 
         function searchDir(dir: string) {
             if (results.length >= maxResults) return;
@@ -202,7 +204,7 @@ export async function handleSearchFiles(args: { directory: string; pattern: stri
 
                 const fullPath = path.join(dir, entry.name);
 
-                if (regex.test(entry.name)) {
+                if (globMatches(glob, path.relative(root, fullPath), entry.name)) {
                     results.push(fullPath);
                 }
 
@@ -424,11 +426,3 @@ function formatBytes(bytes: number): string {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function patternToRegex(pattern: string): RegExp {
-    // Convert glob-like pattern to regex
-    const escaped = pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.');
-    return new RegExp(`^${escaped}$`, 'i');
-}

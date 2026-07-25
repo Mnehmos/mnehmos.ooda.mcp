@@ -12,7 +12,7 @@
         "start": "node dist/index.js",
         "dev": "tsc --watch",
         "prepare": "npm run build",
-        "test": "node --import tsx --test src/tools/batchDispatcher.test.ts && node --import tsx --test src/tools/diff/batchEditBlocks.test.ts && node --import tsx --test src/tools/diff/writeFromLine.test.ts",
+        "test": "node --import tsx --test src/tools/batchDispatcher.test.ts src/tools/diff/batchEditBlocks.test.ts src/tools/diff/writeFromLine.test.ts src/utils/glob.test.ts",
         "test:diff": "node --import tsx --test src/tools/diff/batchEditBlocks.test.ts",
         "test:batch": "node --import tsx --test src/tools/batchDispatcher.test.ts"
     },
