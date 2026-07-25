@@ -33,17 +33,14 @@ function escapeLiteral(char: string): string {
     return REGEX_SPECIALS.test(char) ? `\\${char}` : char;
 }
 
-function escapeLiterals(text: string): string {
-    return text.split('').map(escapeLiteral).join('');
-}
-
 /**
- * Compile a glob pattern into a reusable matcher.
+ * Translate glob syntax into a regex body (unanchored).
+ *
+ * Recurses for brace alternatives so that wildcards inside braces get the same
+ * treatment as wildcards outside them — `{*.ts,*.js}` must behave like
+ * `*.{ts,js}`, not emit a bare `*` quantifier into the output.
  */
-export function compileGlob(pattern: string): CompiledGlob {
-    const normalized = pattern.replace(/\\/g, '/');
-    const matchesFullPath = normalized.includes('/');
-
+function translate(normalized: string): string {
     let out = '';
     let i = 0;
 
@@ -78,10 +75,12 @@ export function compileGlob(pattern: string): CompiledGlob {
         }
 
         if (char === '{') {
+            // Flat alternation only — a nested `{a,{b,c}}` splits on the first
+            // closing brace and yields wrong (but valid, non-throwing) output.
             const close = normalized.indexOf('}', i);
             if (close > i) {
                 const alternatives = normalized.slice(i + 1, close).split(',');
-                out += `(?:${alternatives.map(escapeLiterals).join('|')})`;
+                out += `(?:${alternatives.map(translate).join('|')})`;
                 i = close + 1;
                 continue;
             }
@@ -92,9 +91,18 @@ export function compileGlob(pattern: string): CompiledGlob {
         i++;
     }
 
+    return out;
+}
+
+/**
+ * Compile a glob pattern into a reusable matcher.
+ */
+export function compileGlob(pattern: string): CompiledGlob {
+    const normalized = pattern.replace(/\\/g, '/');
+
     return {
-        regex: new RegExp(`^${out}$`, 'i'),
-        matchesFullPath,
+        regex: new RegExp(`^${translate(normalized)}$`, 'i'),
+        matchesFullPath: normalized.includes('/'),
         source: pattern,
     };
 }

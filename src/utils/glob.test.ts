@@ -89,6 +89,30 @@ describe('compileGlob / globMatches', () => {
         test('an unbalanced brace is treated literally', () => {
             assert.strictEqual(matches('a{b.ts', 'a{b.ts'), true);
         });
+
+        test('wildcards inside brace alternatives are translated, not emitted raw', () => {
+            // Regression: alternatives used to be escaped as literals, so the `*`
+            // reached the regex as a bare quantifier -> "Nothing to repeat".
+            assert.doesNotThrow(() => compileGlob('{*.ts,*.js}'));
+            assert.strictEqual(matches('{*.ts,*.js}', 'index.ts'), true);
+            assert.strictEqual(matches('{*.ts,*.js}', 'index.js'), true);
+            assert.strictEqual(matches('{*.ts,*.js}', 'index.md'), false);
+        });
+
+        test('wildcards inside braces work under a globstar prefix', () => {
+            assert.doesNotThrow(() => compileGlob('**/{*.ts,*.js}'));
+            assert.strictEqual(matches('**/{*.ts,*.js}', 'tools/diff/schemas.ts'), true);
+            assert.strictEqual(matches('**/{*.ts,*.js}', 'tools/README.md'), false);
+        });
+
+        test('brace alternatives may contain path separators', () => {
+            assert.strictEqual(matches('{src,test}/*.ts', 'src/index.ts'), true);
+            assert.strictEqual(matches('{src,test}/*.ts', 'lib/index.ts'), false);
+        });
+
+        test('nested braces do not throw (flat support only)', () => {
+            assert.doesNotThrow(() => compileGlob('{a,{b,c}}'));
+        });
     });
 
     describe('compileGlob metadata', () => {
