@@ -1,119 +1,6 @@
 import { getBatchSafetyLimits } from '../config.js';
 import { logAudit } from '../audit.js';
-import * as cliTools from './cli.js';
-import * as crudTools from './crud.js';
-import * as filesystemTools from './filesystem.js';
-import * as screenTools from './screen.js';
-import * as inputTools from './input.js';
-import * as windowTools from './window.js';
-import * as clipboardTools from './clipboard.js';
-import * as systemTools from './system.js';
-import * as diffTools from './diff/index.js';
-import * as sessionTools from './sessions.js';
-import * as configTools from './configTools.js';
-import * as analyticsTools from './analytics.js';
-import * as executeCodeTools from './executeCode.js';
-
-// Tool Registry - maps tool name to handler function
-// NOTE: Batch tools are excluded to avoid recursion
-type ToolHandler = (args: any) => Promise<any>;
-const TOOL_REGISTRY = new Map<string, ToolHandler>([
-    // CLI Tools (non-batch)
-    ['exec_cli', cliTools.handleExecCli],
-    ['read_file', cliTools.handleReadFile],
-    ['write_file', cliTools.handleWriteFile],
-    ['list_directory', cliTools.handleListDirectory],
-    ['str_replace', cliTools.handleStrReplace],
-    ['read_file_lines', cliTools.handleReadFileLines],
-    ['search_in_file', cliTools.handleSearchInFile],
-
-    // CRUD Tools (non-batch)
-    ['crud_create', crudTools.handleCrudCreate],
-    ['crud_read', crudTools.handleCrudRead],
-    ['crud_update', crudTools.handleCrudUpdate],
-    ['crud_delete', crudTools.handleCrudDelete],
-    ['crud_query', crudTools.handleCrudQuery],
-
-    // Filesystem Tools (non-batch)
-    ['copy_file', filesystemTools.handleCopyFile],
-    ['move_file', filesystemTools.handleMoveFile],
-    ['delete_file', filesystemTools.handleDeleteFile],
-    ['file_info', filesystemTools.handleFileInfo],
-    ['search_files', filesystemTools.handleSearchFiles],
-
-    // Screen Tools
-    ['screenshot', screenTools.handleScreenshot],
-    ['get_screen_info', screenTools.handleGetScreenInfo],
-    ['wait_for_screen_change', screenTools.handleWaitForScreenChange],
-    ['find_on_screen', screenTools.handleFindOnScreen],
-
-    // Input Tools (non-batch)
-    ['keyboard_type', inputTools.handleKeyboardType],
-    ['keyboard_press', inputTools.handleKeyboardPress],
-    ['keyboard_shortcut', inputTools.handleKeyboardShortcut],
-    ['mouse_move', inputTools.handleMouseMove],
-    ['mouse_click', inputTools.handleMouseClick],
-    ['mouse_drag', inputTools.handleMouseDrag],
-    ['mouse_scroll', inputTools.handleMouseScroll],
-    ['get_mouse_position', inputTools.handleGetMousePosition],
-
-    // Window Tools
-    ['list_windows', windowTools.handleListWindows],
-    ['get_active_window', windowTools.handleGetActiveWindow],
-    ['focus_window', windowTools.handleFocusWindow],
-    ['minimize_window', windowTools.handleMinimizeWindow],
-    ['maximize_window', windowTools.handleMaximizeWindow],
-    ['restore_window', windowTools.handleRestoreWindow],
-    ['close_window', windowTools.handleCloseWindow],
-    ['resize_window', windowTools.handleResizeWindow],
-    ['move_window', windowTools.handleMoveWindow],
-    ['launch_application', windowTools.handleLaunchApplication],
-    ['wait_for_window', windowTools.handleWaitForWindow],
-
-    // Clipboard Tools
-    ['clipboard_read', clipboardTools.handleClipboardRead],
-    ['clipboard_write', clipboardTools.handleClipboardWrite],
-    ['clipboard_clear', clipboardTools.handleClipboardClear],
-    ['clipboard_has_format', clipboardTools.handleClipboardHasFormat],
-
-    // System Tools
-    ['get_system_info', systemTools.handleGetSystemInfo],
-    ['list_processes', systemTools.handleListProcesses],
-    ['kill_process', systemTools.handleKillProcess],
-    ['get_environment', systemTools.handleGetEnvironment],
-    ['set_environment', systemTools.handleSetEnvironment],
-    ['get_network_info', systemTools.handleGetNetworkInfo],
-    ['wait', systemTools.handleWait],
-    ['notify', systemTools.handleNotify],
-
-    // Diff Editing Tools
-    ['edit_block', diffTools.handleEditBlock],
-    ['apply_diff', diffTools.handleApplyDiff],
-    ['get_diff_preview', diffTools.handleGetDiffPreview],
-    ['batch_edit_blocks', diffTools.handleBatchEditBlocksMcp],
-    ['write_from_line', diffTools.handleWriteFromLineMcp],
-
-    // Interactive Process Sessions
-    ['start_process', sessionTools.handleStartProcess],
-    ['interact_with_process', sessionTools.handleInteractWithProcess],
-    ['read_process_output', sessionTools.handleReadProcessOutput],
-    ['list_sessions', sessionTools.handleListSessions],
-    ['terminate_process', sessionTools.handleTerminateProcess],
-
-    // Configuration Management
-    ['get_config', configTools.handleGetConfig],
-    ['set_config_value', configTools.handleSetConfigValue],
-    ['reset_config', configTools.handleResetConfig],
-
-    // Analytics and Usage Stats
-    ['get_usage_stats', analyticsTools.handleGetUsageStats],
-    ['get_recent_tool_calls', analyticsTools.handleGetRecentToolCalls],
-    ['get_audit_log_stats', analyticsTools.handleGetAuditLogStats],
-    ['clear_old_logs', analyticsTools.handleClearOldLogs],
-
-    // Execute Code
-    ['execute_code', executeCodeTools.handleExecuteCode],
-]);
+import { ActionEnum, getToolDefinition } from './actionEnum.js';
 
 interface ToolOperation {
     tool: string;
@@ -160,35 +47,36 @@ class SafetyEnforcer {
     }
 
     /**
-     * Apply per-operation limits (e.g., truncate file reads)
+     * Extract text content from a tool result in a type-safe way.
+     * MCP results have shape: { content: Array<{type: 'text', text: string}> }
+     * This utility handles that shape correctly without assuming the old
+     * (incorrect) shape where content was a plain string.
      */
-    static enforcePerOperationLimit(result: any, toolName: string, limits: any): any {
-        // Truncate file read operations
-        if (toolName === 'read_file' && result?.content) {
-            const lines = result.content.split('\n');
-            if (lines.length > limits.maxLinesPerFile) {
-                result.content = lines.slice(0, limits.maxLinesPerFile).join('\n');
-                result.truncated = true;
-                result.totalLines = lines.length;
-                result.shownLines = limits.maxLinesPerFile;
-                result.warning = `Truncated at ${limits.maxLinesPerFile} of ${lines.length} lines`;
-            }
+    static extractText(result: any): string {
+        if (!result) return '';
+        if (typeof result === 'string') return result;
+        if (Array.isArray(result.content)) {
+            return result.content
+                .map((c: any) => (typeof c?.text === 'string' ? c.text : ''))
+                .join('');
         }
-        return result;
+        // Fallback for unexpected shapes — stringify as a last resort.
+        try {
+            return JSON.stringify(result);
+        } catch {
+            return String(result);
+        }
     }
 
     /**
-     * Check aggregate size across all results and generate warnings
+     * Check aggregate size across all results and generate warnings.
+     * Previously stringified entire result objects which inflated counts with
+     * MCP protocol overhead. Now extracts actual text content.
      */
     static checkAggregateSize(results: BatchOperationResult[], limits: any): string[] {
         const totalChars = results
             .filter(r => r.success && r.result)
-            .reduce((sum, r) => {
-                const content = typeof r.result === 'string'
-                    ? r.result
-                    : JSON.stringify(r.result);
-                return sum + content.length;
-            }, 0);
+            .reduce((sum, r) => sum + SafetyEnforcer.extractText(r.result).length, 0);
 
         const warnings = [];
         if (totalChars > limits.maxAggregateChars) {
@@ -209,20 +97,35 @@ async function dispatchToolCall(
     args: any,
     timeout: number
 ): Promise<any> {
-    const handler = TOOL_REGISTRY.get(tool);
-    if (!handler) {
+    if (tool === 'batch_tools') {
+        throw new Error('Nested batch_tools is not allowed — flatten the operations into a single batch.');
+    }
+
+    const toolDef = getToolDefinition(tool);
+    if (!toolDef) {
         throw new Error(
-            `Unknown tool: ${tool}. Available tools: ${Array.from(TOOL_REGISTRY.keys()).slice(0, 10).join(', ')}...`
+            `Unknown tool: ${tool}. Available tools: ${Object.keys(ActionEnum).filter(name => name !== 'batch_tools').slice(0, 10).join(', ')}...`
         );
     }
 
-    // Race between handler execution and timeout
-    return await Promise.race([
-        handler(args),
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Operation timed out after ${timeout}ms`)), timeout)
-        )
-    ]);
+    // Race between handler execution and timeout. Always clear the timer so a
+    // completed operation does not leave a pending handle in the event loop.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            toolDef.handler(args),
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(
+                    () => reject(new Error(`Operation timed out after ${timeout}ms`)),
+                    timeout
+                );
+            })
+        ]);
+    } finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
 }
 
 /**
@@ -252,10 +155,27 @@ export async function handleBatchTools(args: BatchToolsArgs) {
         // Parallel execution - all operations run concurrently
         const promises = args.operations.map(async (op, index) => {
             try {
-                let result = await dispatchToolCall(op.tool, op.args, timeout);
+                const result = await dispatchToolCall(op.tool, op.args, timeout);
 
-                // Apply per-operation safety limits (truncation, etc.)
-                result = SafetyEnforcer.enforcePerOperationLimit(result, op.tool, limits);
+                // Per-operation limits (e.g. read_file truncation) are enforced
+                // by individual handlers themselves. The previous implementation
+                // tried to re-enforce them here by splitting on newlines, which
+                // crashed on MCP's array-of-content-blocks return shape. Removed.
+
+                // MCP convention: handlers signal failure via { isError: true }
+                // rather than throwing. We honor that here so stopOnError and
+                // the success/fail counts reflect real outcomes.
+                if (result && (result as any).isError) {
+                    const errText = SafetyEnforcer.extractText(result) || 'Tool reported error';
+                    return {
+                        index,
+                        tool: op.tool,
+                        label: op.label,
+                        success: false,
+                        error: errText,
+                        result
+                    };
+                }
 
                 return {
                     index,
@@ -282,10 +202,25 @@ export async function handleBatchTools(args: BatchToolsArgs) {
         for (let index = 0; index < args.operations.length; index++) {
             const op = args.operations[index];
             try {
-                let result = await dispatchToolCall(op.tool, op.args, timeout);
+                const result = await dispatchToolCall(op.tool, op.args, timeout);
 
-                // Apply per-operation safety limits
-                result = SafetyEnforcer.enforcePerOperationLimit(result, op.tool, limits);
+                // Per-operation limits enforced by individual handlers (see above).
+
+                // MCP convention: handlers signal failure via { isError: true }
+                // rather than throwing. Honor that so stopOnError works.
+                if (result && (result as any).isError) {
+                    const errText = SafetyEnforcer.extractText(result) || 'Tool reported error';
+                    results.push({
+                        index,
+                        tool: op.tool,
+                        label: op.label,
+                        success: false,
+                        error: errText,
+                        result
+                    });
+                    if (stopOnError) break;
+                    continue;
+                }
 
                 results.push({
                     index,
@@ -329,20 +264,58 @@ export async function handleBatchTools(args: BatchToolsArgs) {
         elapsed
     });
 
+    // Format results in markdown for better readability
+    let markdownOutput = `## Batch Operations Summary\n\n`;
+    markdownOutput += `**Execution Mode:** ${executionMode}\n`;
+    markdownOutput += `**Total Operations:** ${args.operations.length}\n`;
+    markdownOutput += `**Successful:** ${successful}\n`;
+    markdownOutput += `**Failed:** ${failed}\n`;
+    markdownOutput += `**Elapsed Time:** ${elapsed}ms\n\n`;
+    
+    if (warnings.length > 0) {
+        markdownOutput += `### ⚠️ Warnings\n`;
+        warnings.forEach(warning => {
+            markdownOutput += `- ${warning}\n`;
+        });
+        markdownOutput += `\n`;
+    }
+    
+    markdownOutput += `### Detailed Results\n\n`;
+    
+    const sortedResults = results.sort((a, b) => a.index - b.index);
+    let remainingOutputChars = Math.max(0, limits.maxAggregateChars);
+    sortedResults.forEach(result => {
+        const indexStr = `**${result.index + 1}.** `;
+        const toolStr = `\`${result.tool}\``;
+        const labelStr = result.label ? ` (${result.label})` : '';
+        
+        if (result.success) {
+            markdownOutput += `${indexStr}${toolStr}${labelStr} - ✅ Success\n`;
+            if (result.result) {
+                const extractedText = SafetyEnforcer.extractText(result.result);
+                const resultStr = extractedText.slice(0, remainingOutputChars);
+                if (resultStr.length < extractedText.length) {
+                    result.truncated = true;
+                }
+                remainingOutputChars = Math.max(0, remainingOutputChars - extractedText.length);
+                markdownOutput += `\`\`\`\n${resultStr}\n\`\`\`\n`;
+            }
+            if (result.truncated) {
+                markdownOutput += `⚠️ Output truncated\n`;
+            }
+        } else {
+            markdownOutput += `${indexStr}${toolStr}${labelStr} - ❌ Failed\n`;
+            if (result.error) {
+                markdownOutput += `**Error:** ${result.error}\n`;
+            }
+        }
+        markdownOutput += `\n`;
+    });
+    
     return {
         content: [{
             type: 'text',
-            text: JSON.stringify({
-                summary: {
-                    total: args.operations.length,
-                    successful,
-                    failed,
-                    elapsed_ms: elapsed,
-                    executionMode,
-                    warnings
-                },
-                results: results.sort((a, b) => a.index - b.index)
-            }, null, 2)
+            text: markdownOutput
         }],
         isError: failed > 0 && successful === 0,
     };

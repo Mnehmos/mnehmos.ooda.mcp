@@ -5,6 +5,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { logAudit } from '../audit.js';
+import { compileGlob, globMatches, type CompiledGlob } from '../utils/glob.js';
 
 // Search storage
 interface SearchSession {
@@ -50,7 +51,8 @@ export const StopSearchSchema = {
  */
 function searchDirectory(
     dir: string,
-    pattern: RegExp,
+    glob: CompiledGlob,
+    root: string,
     results: string[],
     maxResults: number,
     recursive: boolean
@@ -65,13 +67,13 @@ function searchDirectory(
 
             const fullPath = path.join(dir, entry.name);
 
-            if (pattern.test(entry.name)) {
+            if (globMatches(glob, path.relative(root, fullPath), entry.name)) {
                 results.push(fullPath);
             }
 
             if (recursive && entry.isDirectory()) {
                 try {
-                    searchDirectory(fullPath, pattern, results, maxResults, recursive);
+                    searchDirectory(fullPath, glob, root, results, maxResults, recursive);
                 } catch {
                     // Skip directories we can't access
                 }
@@ -80,17 +82,6 @@ function searchDirectory(
     } catch {
         // Skip directories we can't access
     }
-}
-
-/**
- * Convert glob pattern to regex
- */
-function globToRegex(pattern: string): RegExp {
-    const escaped = pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.');
-    return new RegExp(`^${escaped}$`, 'i');
 }
 
 /**
@@ -129,8 +120,8 @@ export async function handleStartSearch(args: {
 
         // Run search (synchronous for now, could be made async with worker threads)
         try {
-            const regex = globToRegex(args.pattern);
-            searchDirectory(args.directory, regex, session.results, maxResults, recursive);
+            const glob = compileGlob(args.pattern);
+            searchDirectory(args.directory, glob, args.directory, session.results, maxResults, recursive);
             session.completed = true;
         } catch (err: any) {
             session.completed = true;
