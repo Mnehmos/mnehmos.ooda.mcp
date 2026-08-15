@@ -279,18 +279,20 @@ const EnsureMCPInputScript = `
 
             // Convert physical pixel (x,y) to SendInput's normalized 0-65535
             // absolute coordinate range covering the entire virtual screen.
-            // The +1 on dimensions is the standard Windows convention to get
-            // the final pixel included in the 65535 range.
+            // Scale the first and last physical pixels to 0 and 65535. Using
+            // dimension - 1 keeps the final pixel reachable.
             private static void NormalizeToVirtualDesk(int x, int y, out int nx, out int ny) {
                 int[] b = GetVirtualScreenBounds();
                 int vLeft = b[0], vTop = b[1], vW = b[2], vH = b[3];
                 // Guard against divide-by-zero on degenerate configs.
                 if (vW < 1) vW = 1;
                 if (vH < 1) vH = 1;
+                int dW = vW > 1 ? vW - 1 : 1;
+                int dH = vH > 1 ? vH - 1 : 1;
                 // Shift so (vLeft, vTop) is origin, then scale to 65535.
                 // Use 64-bit intermediate to avoid overflow on extreme setups.
-                long dx = (long)(x - vLeft) * 65535L / vW;
-                long dy = (long)(y - vTop) * 65535L / vH;
+                long dx = (long)(x - vLeft) * 65535L / dW;
+                long dy = (long)(y - vTop) * 65535L / dH;
                 if (dx < 0) dx = 0; if (dx > 65535) dx = 65535;
                 if (dy < 0) dy = 0; if (dy > 65535) dy = 65535;
                 nx = (int)dx;
@@ -403,6 +405,26 @@ const EnsureMCPInputScript = `
 "@
     }
 `;
+
+function buildWindowsScrollScript(
+    hasPos: boolean,
+    x: number,
+    y: number,
+    deltaY: number,
+    deltaX: number,
+    validateTarget: boolean
+): string {
+    const validation = validateTarget && hasPos
+        ? 'if (-not [MCP_Input]::IsPointOnVirtualScreen(' + x + ', ' + y + ')) {' +
+          '\n    throw "Scroll target (' + x + ', ' + y + ') is outside the virtual screen."' +
+          '\n}'
+        : '';
+    const scroll = '[MCP_Input]::Scroll(' +
+        (hasPos ? '$true' : '$false') + ', ' + x + ', ' + y + ', ' +
+        deltaY + ', ' + deltaX + ') | Out-Null';
+
+    return [EnsureMCPInputScript, validation, scroll].join('\n');
+}
 
 async function moveMouse(x: number, y: number): Promise<void> {
     if (platform === 'win32') {
@@ -601,6 +623,7 @@ export async function handleMouseDrag(args: { startX: number; startY: number; en
         // ButtonUp primitives directly for a real drag gesture.
         if (platform === 'win32') {
             const buttonIdx = args.button === 'right' ? 1 : args.button === 'middle' ? 2 : 0;
+            const stepMs = Math.max(1, Math.round((args.duration ?? 60) / 3));
             const sx = Math.round(args.startX), sy = Math.round(args.startY);
             const ex = Math.round(args.endX), ey = Math.round(args.endY);
             const script = `
@@ -612,11 +635,11 @@ export async function handleMouseDrag(args: { startX: number; startY: number; en
                     throw "Drag end (${ex}, ${ey}) is outside the virtual screen."
                 }
                 [MCP_Input]::MoveTo(${sx}, ${sy}) | Out-Null
-                Start-Sleep -Milliseconds 20
+                Start-Sleep -Milliseconds ${stepMs}
                 [MCP_Input]::ButtonDown(${buttonIdx}) | Out-Null
-                Start-Sleep -Milliseconds 20
+                Start-Sleep -Milliseconds ${stepMs}
                 [MCP_Input]::MoveTo(${ex}, ${ey}) | Out-Null
-                Start-Sleep -Milliseconds 20
+                Start-Sleep -Milliseconds ${stepMs}
                 [MCP_Input]::ButtonUp(${buttonIdx}) | Out-Null
             `;
             await PowerShellSession.getInstance().execute(script);
@@ -664,15 +687,14 @@ export async function handleMouseScroll(args: { x?: number; y?: number; deltaX?:
             const px = hasPos ? Math.round(args.x!) : 0;
             const py = hasPos ? Math.round(args.y!) : 0;
 
-            const script = `
-                ${EnsureMCPInputScript}
-                ${hasPos ? `
-                if (-not [MCP_Input]::IsPointOnVirtualScreen(${px}, ${py})) {
-                    throw "Scroll target (${px}, ${py}) is outside the virtual screen."
-                }
-                ` : ''}
-                [MCP_Input]::Scroll(${hasPos ? '$true' : '$false'}, ${px}, ${py}, ${wheelDelta}, ${hWheelDelta}) | Out-Null
-            `;
+            const script = buildWindowsScrollScript(
+                hasPos,
+                px,
+                py,
+                wheelDelta,
+                hWheelDelta,
+                true
+            );
             await PowerShellSession.getInstance().execute(script);
         } else if (platform === 'darwin') {
             if (args.x !== undefined && args.y !== undefined) {
@@ -865,10 +887,14 @@ export async function handleBatchMouseActions(args: { actions: any[] }) {
                          const hasPos = action.x !== undefined && action.y !== undefined;
                          const px = hasPos ? Math.round(action.x) : 0;
                          const py = hasPos ? Math.round(action.y) : 0;
-                         const scrollScript = `
-                             ${EnsureMCPInputScript}
-                             [MCP_Input]::Scroll(${hasPos ? '$true' : '$false'}, ${px}, ${py}, ${scrollAmt}, ${hScrollAmt}) | Out-Null
-                         `;
+                         const scrollScript = buildWindowsScrollScript(
+                             hasPos,
+                             px,
+                             py,
+                             scrollAmt,
+                             hScrollAmt,
+                             false
+                         );
                          await PowerShellSession.getInstance().execute(scrollScript);
                     } else if (platform !== 'darwin') {
                         const direction = (action.deltaY || 0) > 0 ? 4 : 5;

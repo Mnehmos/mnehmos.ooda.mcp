@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { handleBatchTools } from './batchDispatcher.js';
+import { getToolDefinition, validateToolName } from './actionEnum.js';
 import { closeDb } from '../storage/db.js';
 
 const TEST_DIR = path.join(os.tmpdir(), 'batch-dispatcher-test-' + Date.now());
@@ -40,8 +41,13 @@ function parseBatchMarkdown(text: string): {
         // Find the error line if this was a failure. It follows the status line.
         let error: string | undefined;
         if (!success) {
-            const afterStatus = text.slice(match.index);
-            const errMatch = afterStatus.match(/\*\*Error:\*\*\s*([^\n]+)/);
+            const resultStart = match.index + match[0].length;
+            const nextResult = text.slice(resultStart).match(/\*\*\d+\.\*\*/);
+            const resultEnd = nextResult
+                ? resultStart + nextResult.index!
+                : text.length;
+            const currentResult = text.slice(resultStart, resultEnd);
+            const errMatch = currentResult.match(/\*\*Error:\*\*\s*([^\n]+)/);
             if (errMatch) error = errMatch[1];
         }
 
@@ -167,6 +173,25 @@ describe('batchDispatcher', () => {
             assert.strictEqual(parsed.failed, 1);
             assert.strictEqual(parsed.results[0].success, false);
             assert.ok(parsed.results[0].error?.includes('Unknown tool'));
+        });
+
+        it('should reject nested batch_tools operations', async () => {
+            const result = await handleBatchTools({
+                operations: [
+                    { tool: 'batch_tools', args: { operations: [] } }
+                ]
+            });
+
+            const parsed = parseBatchMarkdown(result.content[0].text);
+
+            assert.strictEqual(parsed.failed, 1);
+            assert.ok(parsed.results[0].error?.includes('Nested batch_tools is not allowed'));
+        });
+
+        it('should only resolve own tool registry properties', () => {
+            assert.strictEqual(validateToolName('read_file'), true);
+            assert.strictEqual(validateToolName('toString'), false);
+            assert.strictEqual(getToolDefinition('constructor'), undefined);
         });
 
         it('should preserve operation labels in results', async () => {

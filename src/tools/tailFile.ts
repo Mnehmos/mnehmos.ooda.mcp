@@ -24,10 +24,10 @@ import { logAudit } from '../audit.js';
 
 export const TailFileSchema = {
     path: z.string().describe('Absolute path to the file to tail'),
-    fromByte: z.number().optional().describe('Byte offset to start reading from. Pass the endByte from the previous call to resume. Default: current end of file (tail only new content).'),
-    timeoutSeconds: z.number().optional().describe('If >0, block up to this many seconds waiting for new content. Default: 0 (one-shot poll).'),
-    pollMs: z.number().optional().describe('Polling interval in ms when blocking. Default: 250ms.'),
-    maxBytes: z.number().optional().describe('Maximum bytes to return in one call. Default: 64KB. Prevents runaway output on files that grew enormously between calls.'),
+    fromByte: z.number().finite().int().min(0).optional().describe('Byte offset to start reading from. Pass the endByte from the previous call to resume. Default: current end of file (tail only new content).'),
+    timeoutSeconds: z.number().finite().min(0).max(3600).optional().describe('If >0, block up to this many seconds waiting for new content. Maximum: 1 hour. Default: 0 (one-shot poll).'),
+    pollMs: z.number().finite().int().min(10).max(60000).optional().describe('Polling interval in ms when blocking. Must be between 10ms and 60s. Default: 250ms.'),
+    maxBytes: z.number().finite().int().min(1).max(64 * 1024).optional().describe('Maximum bytes to return in one call. Maximum: 64KB. Prevents runaway output on files that grew enormously between calls.'),
 };
 
 export interface TailFileArgs {
@@ -86,6 +86,7 @@ export async function handleTailFile(args: TailFileArgs) {
         const maxBytes = args.maxBytes ?? 64 * 1024;
 
         if (!fs.existsSync(args.path)) {
+            await logAudit('tail_file', args, null, `file not found: ${args.path}`);
             return {
                 content: [{ type: 'text', text: `Error: file not found: ${args.path}` }],
                 isError: true,
@@ -105,8 +106,19 @@ export async function handleTailFile(args: TailFileArgs) {
             startByte = 0;
         }
 
+        // Re-stat immediately before every read so truncation/rotation between
+        // calls resets the cursor instead of silently skipping new content.
+        const readAtCursor = () => {
+            const currentSize = fs.statSync(args.path).size;
+            if (currentSize < startByte) {
+                fileRotated = true;
+                startByte = 0;
+            }
+            return readRange(args.path, startByte, maxBytes);
+        };
+
         // One-shot read. If content available, return immediately.
-        let result = readRange(args.path, startByte, maxBytes);
+        let result = readAtCursor();
 
         if (result.bytesRead > 0 || timeoutSeconds <= 0) {
             const payload: TailResult = {
@@ -129,7 +141,7 @@ export async function handleTailFile(args: TailFileArgs) {
         const deadline = Date.now() + timeoutSeconds * 1000;
         while (Date.now() < deadline) {
             await new Promise(r => setTimeout(r, pollMs));
-            result = readRange(args.path, startByte, maxBytes);
+            result = readAtCursor();
             if (result.bytesRead > 0) {
                 const payload: TailResult = {
                     path: args.path,

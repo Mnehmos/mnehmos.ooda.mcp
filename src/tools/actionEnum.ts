@@ -15,6 +15,8 @@
 
 import { z } from 'zod';
 import * as cliTools from './cli.js';
+import * as fileSearchTools from './fileSearch.js';
+import * as fileOperations from './fileOperations.js';
 import * as crudTools from './crud.js';
 import * as filesystemTools from './filesystem.js';
 import * as screenTools from './screen.js';
@@ -57,7 +59,7 @@ export interface ToolDefinition {
   description: string;
   category: ToolCategory;
   handler: (args: any) => Promise<any>;
-  inputSchema: Record<string, any>;
+  inputSchema: Record<string, z.ZodTypeAny>;
   requiredFields?: string[];
 }
 
@@ -86,24 +88,24 @@ export const ActionEnum: Record<string, ToolDefinition> = {
     name: 'read_file',
     description: 'Read file contents. ⚠️ CONTEXT WARNING: Truncates at 500 lines. For large files or targeted access, PREFER these surgical alternatives:\n• read_file_lines - Read specific line ranges (use offset: -50 for last 50 lines)\n• search_in_file - Find patterns with context lines\n• edit_block - Search/replace without full read\nFull file reads consume context rapidly. Be surgical.',
     category: ToolCategory.CLI,
-    handler: cliTools.handleReadFile,
-    inputSchema: cliTools.ReadFileSchema,
+    handler: fileOperations.handleReadFile,
+    inputSchema: fileOperations.ReadFileSchema,
     requiredFields: ['path']
   },
   write_file: {
     name: 'write_file',
     description: 'Write content to a file',
     category: ToolCategory.CLI,
-    handler: cliTools.handleWriteFile,
-    inputSchema: cliTools.WriteFileSchema,
+    handler: fileOperations.handleWriteFile,
+    inputSchema: fileOperations.WriteFileSchema,
     requiredFields: ['path', 'content']
   },
   list_directory: {
     name: 'list_directory',
     description: 'List contents of a directory',
     category: ToolCategory.CLI,
-    handler: cliTools.handleListDirectory,
-    inputSchema: cliTools.ListDirectorySchema,
+    handler: fileOperations.handleListDirectory,
+    inputSchema: fileOperations.ListDirectorySchema,
     requiredFields: ['path']
   },
   str_replace: {
@@ -148,7 +150,7 @@ export const ActionEnum: Record<string, ToolDefinition> = {
   },
   search_files: {
     name: 'search_files',
-    description: 'Search for files by pattern in a directory tree.',
+    description: 'Search for files by glob pattern in a directory tree. Patterns containing "/" match paths relative to the search root (for example, "**/*.ts" or "src/tools/*.ts"); patterns without a separator match file basenames (for example, "*.ts"). Supports **, *, ?, and {a,b} alternation; matching is case-insensitive.',
     category: ToolCategory.CLI,
     handler: filesystemTools.handleSearchFiles,
     inputSchema: filesystemTools.SearchFilesSchema,
@@ -158,16 +160,16 @@ export const ActionEnum: Record<string, ToolDefinition> = {
     name: 'read_file_lines',
     description: 'Read specific lines from a file (token-efficient). Returns line range with optional line numbers. Use this instead of read_file when you only need a portion of a large file.',
     category: ToolCategory.CLI,
-    handler: cliTools.handleReadFileLines,
-    inputSchema: cliTools.ReadFileLinesSchema,
+    handler: fileOperations.handleReadFileLines,
+    inputSchema: fileOperations.ReadFileLinesSchema,
     requiredFields: ['path']
   },
   search_in_file: {
     name: 'search_in_file',
     description: 'Search for text or regex patterns within a file. Returns matching lines with optional context. More efficient than reading entire file when looking for specific content.',
     category: ToolCategory.CLI,
-    handler: cliTools.handleSearchInFile,
-    inputSchema: cliTools.SearchInFileSchema,
+    handler: fileSearchTools.handleSearchInFile,
+    inputSchema: fileSearchTools.SearchInFileSchema,
     requiredFields: ['path', 'pattern']
   },
   tail_file: {
@@ -808,14 +810,16 @@ export function getToolsByCategory(): Record<string, ToolDefinition[]> {
  * Get tool definition by name
  */
 export function getToolDefinition(name: string): ToolDefinition | undefined {
-  return ActionEnum[name];
+  return Object.prototype.hasOwnProperty.call(ActionEnum, name)
+    ? ActionEnum[name]
+    : undefined;
 }
 
 /**
  * Validate that a tool name exists in the ActionEnum
  */
 export function validateToolName(name: string): boolean {
-  return name in ActionEnum;
+  return Object.prototype.hasOwnProperty.call(ActionEnum, name);
 }
 
 /**
@@ -842,6 +846,9 @@ export function auditToolRegistry(): string[] {
   
   // Check for missing required fields
   Object.entries(ActionEnum).forEach(([name, tool]) => {
+    if (name !== tool.name) {
+      issues.push(`Registry key ${name} does not match tool name ${tool.name}`);
+    }
     if (!tool.name) {
       issues.push(`Tool ${name} missing name`);
     }

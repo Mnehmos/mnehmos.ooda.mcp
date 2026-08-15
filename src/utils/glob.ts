@@ -1,109 +1,177 @@
 /**
  * Glob pattern matching shared by search_files and start_search.
  *
- * Previously both tools compiled globs with a naive `*` -> `.*` substitution and
- * tested the result against the *basename* only. That made every path-scoped
- * pattern — including the `**\/*.ts` form advertised in the tool schemas —
- * match nothing at all, silently.
+ * Matching is implemented as a memoized token matcher instead of compiling
+ * user-controlled patterns to regular expressions. This keeps wildcard work
+ * bounded by the pattern and candidate lengths and avoids regex backtracking
+ * surprises on hostile input.
  *
- * Semantics implemented here:
+ * Semantics:
  *   - A pattern containing a path separator is matched against the candidate's
  *     path relative to the search root (separators normalized to `/`).
- *   - A pattern with no separator is matched against the basename, which
- *     preserves the previous behaviour for patterns like `*.ts` or `README.md`.
+ *   - A pattern with no separator is matched against the basename, preserving
+ *     the previous behaviour for patterns like `*.ts` or `README.md`.
  *   - `**\/` matches zero or more leading path segments, so `**\/*.ts` matches
  *     both `a.ts` and `nested/dir/a.ts`.
  *   - `*` and `?` do not cross path separators.
- *   - `{a,b}` expands to an alternation (flat, non-nested).
+ *   - `{a,b}` expands to a flat alternation.
  *   - Matching is case-insensitive, as before.
  */
 
+const MAX_GLOB_LENGTH = 4096;
+const MAX_ALTERNATIVES = 256;
+
+type GlobToken =
+    | { kind: 'literal'; value: string }
+    | { kind: 'star' }
+    | { kind: 'question' }
+    | { kind: 'globstar' }
+    | { kind: 'globstarPath' };
+
 export interface CompiledGlob {
-    /** Anchored regex the candidate string is tested against. */
-    regex: RegExp;
     /** When true, test against the relative path; otherwise the basename. */
     matchesFullPath: boolean;
     /** The original pattern, kept for diagnostics. */
     source: string;
+    /** Expanded token alternatives used by globMatches. */
+    alternatives: GlobToken[][];
 }
 
-const REGEX_SPECIALS = /[.+^${}()|[\]\\]/;
+function expandBraces(pattern: string): string[] {
+    const open = pattern.indexOf('{');
+    if (open < 0) {
+        return [pattern];
+    }
 
-function escapeLiteral(char: string): string {
-    return REGEX_SPECIALS.test(char) ? `\\${char}` : char;
+    const close = pattern.indexOf('}', open + 1);
+    if (close <= open) {
+        // Unbalanced braces are treated as literals for compatibility.
+        return [pattern];
+    }
+
+    const prefix = pattern.slice(0, open);
+    const suffix = pattern.slice(close + 1);
+    const alternatives = pattern.slice(open + 1, close).split(',');
+    return alternatives.flatMap(alternative =>
+        expandBraces(`${prefix}${alternative}${suffix}`)
+    );
 }
 
-/**
- * Translate glob syntax into a regex body (unanchored).
- *
- * Recurses for brace alternatives so that wildcards inside braces get the same
- * treatment as wildcards outside them — `{*.ts,*.js}` must behave like
- * `*.{ts,js}`, not emit a bare `*` quantifier into the output.
- */
-function translate(normalized: string): string {
-    let out = '';
-    let i = 0;
+function tokenize(pattern: string): GlobToken[] {
+    const tokens: GlobToken[] = [];
 
-    while (i < normalized.length) {
-        const char = normalized[i];
+    for (let i = 0; i < pattern.length;) {
+        const char = pattern[i];
 
         if (char === '*') {
             let end = i;
-            while (normalized[end] === '*') end++;
-            const isGlobstar = end - i > 1;
+            while (pattern[end] === '*') {
+                end++;
+            }
 
-            if (isGlobstar && normalized[end] === '/') {
-                // `**/` — zero or more complete path segments.
-                out += '(?:[^/]*\\/)*';
+            if (end - i > 1 && pattern[end] === '/') {
+                // Consume the separator as part of the globstar so it can
+                // match zero directories (`**/file.ts` => `file.ts`).
+                tokens.push({ kind: 'globstarPath' });
                 i = end + 1;
-            } else if (isGlobstar) {
-                // Trailing `**` — anything, separators included.
-                out += '.*';
+            } else if (end - i > 1) {
+                tokens.push({ kind: 'globstar' });
                 i = end;
             } else {
-                // Single `*` — anything within one path segment.
-                out += '[^/]*';
+                tokens.push({ kind: 'star' });
                 i = end;
             }
             continue;
         }
 
         if (char === '?') {
-            out += '[^/]';
+            tokens.push({ kind: 'question' });
             i++;
             continue;
         }
 
-        if (char === '{') {
-            // Flat alternation only — a nested `{a,{b,c}}` splits on the first
-            // closing brace and yields wrong (but valid, non-throwing) output.
-            const close = normalized.indexOf('}', i);
-            if (close > i) {
-                const alternatives = normalized.slice(i + 1, close).split(',');
-                out += `(?:${alternatives.map(translate).join('|')})`;
-                i = close + 1;
-                continue;
-            }
-            // Unbalanced brace: fall through and treat it as a literal.
-        }
-
-        out += escapeLiteral(char);
+        tokens.push({ kind: 'literal', value: char.toLowerCase() });
         i++;
     }
 
-    return out;
+    return tokens;
 }
 
-/**
- * Compile a glob pattern into a reusable matcher.
- */
+function matchesTokens(tokens: GlobToken[], candidate: string): boolean {
+    const memo = new Map<string, boolean>();
+
+    const visit = (tokenIndex: number, candidateIndex: number): boolean => {
+        const key = `${tokenIndex}:${candidateIndex}`;
+        const cached = memo.get(key);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        let matched = false;
+        const token = tokens[tokenIndex];
+
+        if (!token) {
+            matched = candidateIndex === candidate.length;
+        } else if (token.kind === 'literal') {
+            matched = candidate[candidateIndex] === token.value
+                && visit(tokenIndex + 1, candidateIndex + 1);
+        } else if (token.kind === 'question') {
+            matched = candidateIndex < candidate.length
+                && candidate[candidateIndex] !== '/'
+                && visit(tokenIndex + 1, candidateIndex + 1);
+        } else if (token.kind === 'star') {
+            // Try every position in the current path segment. Memoization
+            // ensures each token/candidate state is evaluated only once.
+            for (let index = candidateIndex; index <= candidate.length; index++) {
+                if (index < candidate.length && candidate[index] === '/') {
+                    break;
+                }
+                if (visit(tokenIndex + 1, index)) {
+                    matched = true;
+                    break;
+                }
+            }
+        } else if (token.kind === 'globstarPath') {
+            // First try zero directories, then consume one complete segment
+            // at a time while staying on the same globstar token.
+            matched = visit(tokenIndex + 1, candidateIndex);
+            if (!matched) {
+                for (let index = candidateIndex; index < candidate.length; index++) {
+                    if (candidate[index] === '/' && visit(tokenIndex, index + 1)) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // A trailing `**` can cross path separators.
+            matched = visit(tokenIndex + 1, candidateIndex)
+                || (candidateIndex < candidate.length && visit(tokenIndex, candidateIndex + 1));
+        }
+
+        memo.set(key, matched);
+        return matched;
+    };
+
+    return visit(0, 0);
+}
+
+/** Compile a glob pattern into a reusable token matcher. */
 export function compileGlob(pattern: string): CompiledGlob {
     const normalized = pattern.replace(/\\/g, '/');
+    if (normalized.length > MAX_GLOB_LENGTH) {
+        throw new Error(`Glob pattern exceeds the ${MAX_GLOB_LENGTH}-character limit`);
+    }
+
+    const expanded = expandBraces(normalized);
+    if (expanded.length > MAX_ALTERNATIVES) {
+        throw new Error(`Glob pattern expands to more than ${MAX_ALTERNATIVES} alternatives`);
+    }
 
     return {
-        regex: new RegExp(`^${translate(normalized)}$`, 'i'),
         matchesFullPath: normalized.includes('/'),
         source: pattern,
+        alternatives: expanded.map(tokenize),
     };
 }
 
@@ -115,6 +183,8 @@ export function compileGlob(pattern: string): CompiledGlob {
  * @param basename     Entry name on its own.
  */
 export function globMatches(glob: CompiledGlob, relativePath: string, basename: string): boolean {
-    const candidate = glob.matchesFullPath ? relativePath.replace(/\\/g, '/') : basename;
-    return glob.regex.test(candidate);
+    const candidate = (glob.matchesFullPath ? relativePath : basename)
+        .replace(/\\/g, '/')
+        .toLowerCase();
+    return glob.alternatives.some(alternative => matchesTokens(alternative, candidate));
 }

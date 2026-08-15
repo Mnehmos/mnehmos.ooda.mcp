@@ -27,7 +27,7 @@ function toJsonSchema(schemaObj: Record<string, z.ZodTypeAny>, required?: string
 const server = new Server(
     {
         name: 'mnehmos.ooda.mcp',
-        version: '1.0.6',
+        version: '1.1.0',
     },
     {
         capabilities: {
@@ -58,7 +58,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}. Available tools: ${Object.keys(ActionEnum).join(', ')}`);
     }
 
-    return toolDef.handler(args);
+    const parsed = z.object(toolDef.inputSchema).safeParse(args);
+    if (!parsed.success) {
+        const details = parsed.error.issues
+            .map(issue => `${issue.path.join('.') || 'arguments'}: ${issue.message}`)
+            .join('; ');
+        throw new Error(`Invalid arguments for ${name}: ${details}`);
+    }
+
+    return toolDef.handler(parsed.data);
 });
 
 async function main() {
@@ -69,7 +77,7 @@ async function main() {
 
         const transport = new StdioServerTransport();
         await server.connect(transport);
-        console.error('MCP OODA Computer Server v1.0.6 running on stdio');
+        console.error('MCP OODA Computer Server v1.1.0 running on stdio');
         console.error('Tools: CLI, CRUD, Filesystem, Screen, Input, Window, Clipboard, System, Browser, Sessions');
     } catch (error) {
         console.error('Failed to start server:', error);

@@ -10,6 +10,18 @@ import { PowerShellSession } from '../utils/powerShellSession.js';
 
 const execAsync = promisify(exec);
 
+interface VirtualScreenBounds {
+    X: number;
+    Y: number;
+    Width: number;
+    Height: number;
+}
+
+interface DisplayInfo {
+    displays: any[];
+    virtualScreen: VirtualScreenBounds | null;
+}
+
 // Schema definitions
 export const ScreenshotSchema = {
     region: z.object({
@@ -117,7 +129,7 @@ async function captureScreen(options: {
 }
 
 // Get screen/display information
-async function getDisplayInfo(): Promise<any[]> {
+async function getDisplayInfo(): Promise<DisplayInfo> {
     const platform = os.platform();
 
     if (platform === 'win32') {
@@ -204,13 +216,19 @@ public static class MCP_MonitorDpi {
         `;
         const stdout = await PowerShellSession.getInstance().execute(script);
         const parsed = JSON.parse(stdout);
-        // Return a structured object the handler can wrap — we want to preserve
-        // VirtualScreen at the top level, which handleGetScreenInfo will merge in.
-        return parsed as any;
+        return {
+            displays: Array.isArray(parsed?.Displays) ? parsed.Displays : [],
+            virtualScreen: parsed?.VirtualScreen ?? null,
+        };
     } else if (platform === 'darwin') {
         const { stdout } = await execAsync(`system_profiler SPDisplaysDataType -json`, { timeout: 5000 });
         const data = JSON.parse(stdout);
-        return data.SPDisplaysDataType?.[0]?.spdisplays_ndrvs || [];
+        return {
+            displays: Array.isArray(data.SPDisplaysDataType?.[0]?.spdisplays_ndrvs)
+                ? data.SPDisplaysDataType[0].spdisplays_ndrvs
+                : [],
+            virtualScreen: null,
+        };
     } else {
         const { stdout } = await execAsync(`xrandr --query`, { timeout: 5000 });
         const displays: any[] = [];
@@ -225,7 +243,7 @@ public static class MCP_MonitorDpi {
                 y: parseInt(match[5]),
             });
         }
-        return displays;
+        return { displays, virtualScreen: null };
     }
 }
 
@@ -294,21 +312,9 @@ export async function handleScreenshot(args: {
 
 export async function handleGetScreenInfo() {
     try {
-        const info = await getDisplayInfo() as any;
+        const { displays, virtualScreen } = await getDisplayInfo();
 
         await logAudit('get_screen_info', {}, 'success');
-
-        // Windows path returns structured { Displays, VirtualScreen }; other
-        // platforms return a plain display array. Normalize to a single shape
-        // so callers can rely on it regardless of OS.
-        let displays: any[];
-        let virtualScreen: any = null;
-        if (info && typeof info === 'object' && !Array.isArray(info) && info.Displays) {
-            displays = info.Displays;
-            virtualScreen = info.VirtualScreen;
-        } else {
-            displays = Array.isArray(info) ? info : [info];
-        }
 
         return {
             content: [{

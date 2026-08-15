@@ -53,7 +53,6 @@ $dpiResult = [MCP_DpiInit]::TrySetPerMonitorV2()
 
 export class PowerShellSession {
     private static defaultInstance: PowerShellSession;
-    private static elevatedInstance: PowerShellSession | null = null;
 
     private process: ChildProcessWithoutNullStreams | null = null;
     private buffer: string = '';
@@ -61,6 +60,7 @@ export class PowerShellSession {
         resolve: (value: string) => void;
         reject: (reason: any) => void;
         token: string;
+        errorToken: string;
     } | null = null;
     private isReady: boolean = false;
     private readonly elevated: boolean;
@@ -82,34 +82,11 @@ export class PowerShellSession {
     }
 
     /**
-     * Get the elevated PowerShell session singleton. First call triggers a UAC
-     * prompt; subsequent calls reuse the elevated process. Returns null if we
-     * cannot obtain elevation (non-Windows platform, UAC denied, etc.) and the
-     * caller should fall back or report an error.
-     *
-     * The elevated session runs all commands with administrator privileges.
-     * Expensive to create (UAC prompt latency, ~seconds), cheap to reuse.
+     * Persistent elevated sessions are not supported. Use
+     * execElevatedOneShot() for the supported fire-and-forget UAC path.
      */
     public static async getElevatedInstance(): Promise<PowerShellSession | null> {
-        if (PowerShellSession.elevatedInstance) {
-            return PowerShellSession.elevatedInstance;
-        }
-        if (os.platform() !== 'win32') {
-            // Only Windows has UAC; on other platforms, existing sudo-like flows
-            // are out of scope for this abstraction.
-            return null;
-        }
-        try {
-            const session = new PowerShellSession(true);
-            // Give the elevated process a moment to spin up and pass UAC before
-            // any command tries to use it.
-            await new Promise(r => setTimeout(r, 500));
-            PowerShellSession.elevatedInstance = session;
-            return session;
-        } catch (err) {
-            console.error('[PowerShellSession] Elevated session creation failed:', err);
-            return null;
-        }
+        return null;
     }
 
     public isElevated(): boolean {
@@ -189,14 +166,23 @@ export class PowerShellSession {
         const chunk = data.toString();
         this.buffer += chunk;
 
-        if (this.currentTask && this.buffer.includes(this.currentTask.token)) {
-            const [output, ...rest] = this.buffer.split(this.currentTask.token);
+        const task = this.currentTask;
+        if (task && this.buffer.includes(task.token)) {
+            const [output, ...rest] = this.buffer.split(task.token);
             const cleanOutput = output.trim();
+            const errorMarker = task.errorToken;
+            const errorLine = cleanOutput
+                .split(/\r?\n/)
+                .find(line => line.startsWith(errorMarker));
 
-            this.currentTask.resolve(cleanOutput);
-
-            this.buffer = rest.join(this.currentTask.token);
+            this.buffer = rest.join(task.token);
             this.currentTask = null;
+
+            if (errorLine) {
+                task.reject(new Error(errorLine.slice(errorMarker.length).trim()));
+            } else {
+                task.resolve(cleanOutput);
+            }
         }
     }
 
@@ -212,15 +198,16 @@ export class PowerShellSession {
 
         return new Promise((resolve, reject) => {
             const token = `__EOC_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
+            const errorToken = `__ERR_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
 
-            this.currentTask = { resolve, reject, token };
+            this.currentTask = { resolve, reject, token, errorToken };
 
             const wrappedCommand = `
                 $ErrorActionPreference = 'Stop'
                 try {
                     ${command}
                 } catch {
-                    Write-Error $_
+                    Write-Output "${errorToken}$($_.Exception.Message -replace '\\r?\\n', ' ')"
                 } finally {
                     Write-Output "${token}"
                 }
@@ -231,6 +218,7 @@ export class PowerShellSession {
             if (this.process && this.process.stdin) {
                 this.process.stdin.write(wrappedCommand + '\n');
             } else {
+                this.currentTask = null;
                 reject(new Error('PowerShell process not ready'));
             }
         });

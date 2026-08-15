@@ -97,6 +97,10 @@ async function dispatchToolCall(
     args: any,
     timeout: number
 ): Promise<any> {
+    if (tool === 'batch_tools') {
+        throw new Error('Nested batch_tools is not allowed — flatten the operations into a single batch.');
+    }
+
     const toolDef = getToolDefinition(tool);
     if (!toolDef) {
         throw new Error(
@@ -104,13 +108,24 @@ async function dispatchToolCall(
         );
     }
 
-    // Race between handler execution and timeout
-    return await Promise.race([
-        toolDef.handler(args),
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Operation timed out after ${timeout}ms`)), timeout)
-        )
-    ]);
+    // Race between handler execution and timeout. Always clear the timer so a
+    // completed operation does not leave a pending handle in the event loop.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            toolDef.handler(args),
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(
+                    () => reject(new Error(`Operation timed out after ${timeout}ms`)),
+                    timeout
+                );
+            })
+        ]);
+    } finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
 }
 
 /**
@@ -268,6 +283,7 @@ export async function handleBatchTools(args: BatchToolsArgs) {
     markdownOutput += `### Detailed Results\n\n`;
     
     const sortedResults = results.sort((a, b) => a.index - b.index);
+    let remainingOutputChars = Math.max(0, limits.maxAggregateChars);
     sortedResults.forEach(result => {
         const indexStr = `**${result.index + 1}.** `;
         const toolStr = `\`${result.tool}\``;
@@ -276,9 +292,12 @@ export async function handleBatchTools(args: BatchToolsArgs) {
         if (result.success) {
             markdownOutput += `${indexStr}${toolStr}${labelStr} - ✅ Success\n`;
             if (result.result) {
-                const resultStr = typeof result.result === 'string' 
-                    ? result.result 
-                    : JSON.stringify(result.result, null, 2);
+                const extractedText = SafetyEnforcer.extractText(result.result);
+                const resultStr = extractedText.slice(0, remainingOutputChars);
+                if (resultStr.length < extractedText.length) {
+                    result.truncated = true;
+                }
+                remainingOutputChars = Math.max(0, remainingOutputChars - extractedText.length);
                 markdownOutput += `\`\`\`\n${resultStr}\n\`\`\`\n`;
             }
             if (result.truncated) {
